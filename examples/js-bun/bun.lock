@@ -1,0 +1,15 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "js-bun",
+      "dependencies": {
+        "@upone/js-helper": "file:../_shared/js-helper",
+      },
+    },
+  },
+  "packages": {
+    "@upone/js-helper": ["@upone/js-helper@file:../_shared/js-helper", {}],
+  }
+}

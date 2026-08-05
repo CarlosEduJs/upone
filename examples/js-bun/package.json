@@ -1,0 +1,8 @@
+{
+  "name": "js-bun",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@upone/js-helper": "file:../_shared/js-helper"
+  }
+}
