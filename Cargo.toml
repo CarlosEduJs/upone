@@ -4,12 +4,13 @@ members = [
     "crates/core",
     "crates/providers",
     "crates/cli",
+    "xtask",
 ]
 
 [workspace.package]
-version = "0.1.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/CarlosEduJs/upone"
 
 [workspace.dependencies]
 upone-core = { path = "crates/core" }
@@ -23,3 +24,10 @@ anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 dirs = "6"
+semver = "1"
+serde_json = "1"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

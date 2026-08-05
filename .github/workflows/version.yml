@@ -1,0 +1,59 @@
+name: version
+
+# Turns changeset notes under .changes/ into a version-bump + changelog PR.
+on:
+  push:
+    branches: [main]
+    paths: [".changes/**"]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: version-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: xtask
+
+      # Aggregates notes: bumps versions, writes changelogs, archives notes,
+      # and (if anything changed) writes .release/version + .release/body.md.
+      - name: Run version tooling
+        run: cargo run -q -p xtask -- version
+
+      - name: Open release PR
+        if: hashFiles('.release/version') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(cat .release/version)"
+          BRANCH="release/v${VERSION}"
+          echo "preparing release v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add crates CHANGELOG.md .changes
+          git commit -m "chore: release v${VERSION}"
+          git push --force-with-lease origin "$BRANCH"
+          if gh pr view "$BRANCH" --json number --jq .number >/dev/null 2>&1; then
+            echo "pull request already exists for $BRANCH"
+          else
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "chore: release v${VERSION}" \
+              --body-file .release/body.md
+          fi

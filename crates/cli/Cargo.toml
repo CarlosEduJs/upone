@@ -1,8 +1,10 @@
 [package]
 name = "upone"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+repository = "https://github.com/CarlosEduJs/upone"
 
 [[bin]]
 name = "upone"
@@ -15,3 +17,7 @@ clap.workspace = true
 anyhow.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
+
+# dist ships the upone binary; publish stays off (no crates.io).
+[package.metadata.dist]
+dist = true
