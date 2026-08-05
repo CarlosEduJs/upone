@@ -1,0 +1,54 @@
+name: dispatch-release
+
+# After a merged version release PR lands a version bump (commit "chore: release vX.Y.Z"),
+# trigger the cargo-dist Release workflow with the exact tag input so its
+# workflow_dispatch path builds and publishes binaries for that version.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dispatch-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: xtask
+
+      # Guard: only fire when this push is an actual release merge
+      # ("chore: release vX.Y.Z") AND a pending version exists.
+      - name: Determine pending release
+        id: pending
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          VERSION="$(cargo run -q -p xtask -- pending-release-tag)"
+          echo "version=${VERSION}"
+          if [[ "$COMMIT_MSG" =~ ^chore:\ release\ v[0-9] ]] && [[ -n "$VERSION" ]]; then
+            echo "release-pending=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "release-pending=false" >> "$GITHUB_OUTPUT"
+            echo "no release merge"
+          fi
+
+      - name: Dispatch cargo-dist Release
+        if: ${{ steps.pending.outputs.release-pending == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release.yml --ref main --field tag="v${{ steps.pending.outputs.tag }}"

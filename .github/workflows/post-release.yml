@@ -1,0 +1,44 @@
+name: post-release
+
+# After cargo-dist "Release" finishes publishing a GitHub Release, replace the
+# generated changelog body with the curated body rendered from our changeset
+# notes (xtask update-release-body). Uses a fine-grained PAT because the
+# default GITHUB_TOKEN here is limited within a workflow_run-triggered run.
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  set_body:
+    runs-on: ubuntu-latest
+    # Only act on genuine release dispatches, not PR plan runs of "Release".
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: xtask
+
+      - name: Locate released tag
+        run: |
+          git fetch --prune --tags
+          TAG="$(git tag --sort=-v:refname | head -n 1)"
+          if [[ -z "$TAG" ]]; then
+            echo "no tag found" >&2
+            exit 1
+          fi
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+
+      - name: Render and publish body
+        env:
+          GH_TOKEN: ${{ secrets.UPONE_RELEASE_PAT }}
+        run: cargo run -q -p xtask -- update-release-body "$TAG" --publish
