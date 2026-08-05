@@ -1,0 +1,160 @@
+//! Plan execution engine. Runs levels in order, each level in
+//! parallel, and keeps the Report to explain decisions.
+
+use crate::plan::{Plan, RunOutcome, TaskId};
+use crate::{Context, Risk};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum RunError {
+    #[error("task failed: {0}")]
+    Failed(String),
+    #[error("I/O failure: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// An executed step, for the Report/UX.
+#[derive(Debug, Clone)]
+pub struct Step {
+    pub task_id: TaskId,
+    pub label: String,
+    pub description: String,
+    pub risk: Risk,
+    pub status: StepStatus,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepStatus {
+    Planned,
+    Running,
+    Done(RunOutcome),
+    Error(String),
+}
+
+/// Final report: everything that happened (Explain > Hide).
+#[derive(Debug, Default)]
+pub struct Report {
+    pub steps: Vec<Step>,
+}
+
+impl Report {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn has_error(&self) -> bool {
+        self.steps
+            .iter()
+            .any(|s| matches!(s.status, StepStatus::Error(_)))
+    }
+
+    pub fn errors(&self) -> Vec<&Step> {
+        self.steps
+            .iter()
+            .filter(|s| matches!(s.status, StepStatus::Error(_)))
+            .collect()
+    }
+}
+
+/// Progress event emitted during execution.
+#[derive(Debug)]
+pub enum Event {
+    StepStarting(String, String),
+    StepDone(Step),
+}
+
+pub struct Engine<'a> {
+    pub ctx: &'a Context,
+    pub plan: &'a Plan,
+    on_event: Box<dyn FnMut(Event) + Send + 'a>,
+}
+
+impl<'a> Engine<'a> {
+    pub fn new(ctx: &'a Context, plan: &'a Plan, on_event: impl FnMut(Event) + Send + 'a) -> Self {
+        Engine {
+            ctx,
+            plan,
+            on_event: Box::new(on_event),
+        }
+    }
+
+    /// Runs the plan: one level at a time; within a level, independent
+    /// tasks run in parallel. A failure does not abort the others.
+    pub fn run(&mut self, report: &mut Report) {
+        for level in &self.plan.levels {
+            self.run_level(level, report);
+        }
+    }
+
+    fn run_level(&mut self, level: &[TaskId], report: &mut Report) {
+        let mut entries = Vec::new();
+        for id in level {
+            if let Some(task) = self.plan.task(id) {
+                let step = Step {
+                    task_id: task.id.clone(),
+                    label: task.label.clone(),
+                    description: task.description.clone(),
+                    risk: task.risk,
+                    status: StepStatus::Running,
+                    detail: None,
+                };
+                report.steps.push(step.clone());
+                (self.on_event)(Event::StepStarting(task.id.clone(), task.label.clone()));
+
+                let ctx = self.ctx.clone();
+                let run = task.run.clone();
+                entries.push((
+                    task.id.clone(),
+                    task.label.clone(),
+                    std::thread::spawn(move || {
+                        let mut emitted: Vec<String> = Vec::new();
+                        let mut emit = |line: &str| emitted.push(line.to_string());
+                        let outcome = match run {
+                            Some(run) => run(&ctx, &mut emit),
+                            None => Ok(RunOutcome::Ran("no action".to_string())),
+                        };
+                        (outcome, emitted)
+                    }),
+                ));
+            }
+        }
+
+        for (id, label, handle) in entries {
+            let raw = handle.join();
+            if raw.is_err() {
+                let step = Step {
+                    task_id: id,
+                    label,
+                    description: String::new(),
+                    risk: Risk::Low,
+                    status: StepStatus::Error("task thread panicked".to_string()),
+                    detail: None,
+                };
+                report.steps.push(step.clone());
+                (self.on_event)(Event::StepDone(step));
+                continue;
+            }
+            let (outcome, emitted) = raw.unwrap();
+            let detail = if emitted.is_empty() {
+                None
+            } else {
+                Some(emitted.join("\n"))
+            };
+            let status = match outcome {
+                Ok(outcome) => StepStatus::Done(outcome),
+                Err(e) => StepStatus::Error(e.to_string()),
+            };
+            let step = Step {
+                task_id: id,
+                label,
+                description: String::new(),
+                risk: Risk::Low,
+                status,
+                detail,
+            };
+            report.steps.push(step.clone());
+            (self.on_event)(Event::StepDone(step));
+        }
+    }
+}

@@ -1,0 +1,17 @@
+[package]
+name = "upone"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "upone"
+path = "src/main.rs"
+
+[dependencies]
+upone-core.workspace = true
+upone-providers.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
