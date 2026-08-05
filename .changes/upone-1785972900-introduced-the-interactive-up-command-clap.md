@@ -1,0 +1,11 @@
+---
+crate: upone
+bump: minor
+---
+
+Introduced the interactive `up` command (clap) that prepares a project for development.
+Preview the detected providers and the full generated plan before running anything.
+Added `--dry-run` to print the plan and exit without executing any task.
+Added `--yes` to skip the confirmation prompt for scripted or automated runs.
+Render a live terminal UI (ratatui/crossterm) with per-task status, a spinner and risk labels while tasks run.
+Fall back to a plain, non-interactive summary when stdin/stdout are not a terminal (pipes and CI).
