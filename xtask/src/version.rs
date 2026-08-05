@@ -68,9 +68,10 @@ pub fn run(args: crate::VersionArgs) -> Result<()> {
         }
     }
 
-    let release_version = packages
+    let release_version = new_versions
         .get("upone")
-        .map(|p| p.version.clone())
+        .cloned()
+        .or_else(|| packages.get("upone").map(|p| p.version.clone()))
         .context("upone package missing")?;
 
     if args.dry_run {
