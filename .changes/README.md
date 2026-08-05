@@ -6,7 +6,7 @@ version-bump PR, per-crate changelog entries and a GitHub release.
 
 ## Format
 
-Every note is a markdown file with TOML-style frontmatter:
+Every note is a markdown file with YAML-style frontmatter:
 
 ````md
 ---
@@ -35,7 +35,7 @@ Added `--dry-run` and `--yes` flags.
 The fastest way to create a note:
 
 ```bash
-cargo xtask new changeset upone --bump minor --summary "Added --dry-run and --yes flags"
+cargo xtask new upone --bump minor --summary "Added --dry-run and --yes flags"
 ```
 
 Or just drop a file by hand in `.changes/` (any `.md` file except `README.md`).

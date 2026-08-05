@@ -15,6 +15,13 @@ const RELEASABLE: [&str; 3] = ["upone", "upone-core", "upone-providers"];
 pub fn run(args: crate::VersionArgs) -> Result<()> {
     let root = workspace_root()?;
     let mut packages = cx::load_packages(&root)?;
+    // All releasable crates must exist before any indexing below.
+    for name in RELEASABLE {
+        anyhow::ensure!(
+            packages.contains_key(name),
+            "release package not found in workspace: {name}"
+        );
+    }
     let old_versions: BTreeMap<String, Version> = packages
         .iter()
         .map(|(k, p)| (k.clone(), p.version.clone()))
@@ -61,11 +68,10 @@ pub fn run(args: crate::VersionArgs) -> Result<()> {
         }
     }
 
-    let release_version = new_versions
+    let release_version = packages
         .get("upone")
-        .or_else(|| packages.get("upone").map(|p| &p.version))
-        .expect("upone package missing")
-        .clone();
+        .map(|p| p.version.clone())
+        .context("upone package missing")?;
 
     if args.dry_run {
         println!("would release v{release_version}");
@@ -97,7 +103,13 @@ pub fn run(args: crate::VersionArgs) -> Result<()> {
     // 3. Per-crate changelogs.
     let mut bullets_by_crate: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (name, group) in &note_groups {
-        let bullets: Vec<String> = group.iter().map(|n| n.summary.clone()).collect();
+        let bullets: Vec<String> = group
+            .iter()
+            .flat_map(|n| n.summary.lines())
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect();
         bullets_by_crate.insert(name.clone(), bullets);
     }
     // Add dependency-update bullets to upone when a lib bumped.

@@ -9,7 +9,7 @@ use crate::{changelog, cx, workspace_root};
 use cx::Package;
 
 /// Renders the release body for `version` from the per-crate changelogs.
-pub fn render(packages: &BTreeMap<String, Package>, version: &str) -> Result<String> {
+pub fn render(packages: &BTreeMap<String, Package>, _version: &str) -> Result<String> {
     let mut out = String::from("## What's changed\n\n");
     out.push_str("| Crate | Version |\n| --- | --- |\n");
     for p in cx::releasable(packages) {
@@ -17,7 +17,7 @@ pub fn render(packages: &BTreeMap<String, Package>, version: &str) -> Result<Str
     }
     out.push('\n');
     for p in cx::releasable(packages) {
-        let bullets = changelog::read_section(&p.dir.join("CHANGELOG.md"), version)?;
+        let bullets = changelog::read_section(&p.dir.join("CHANGELOG.md"), &p.version.to_string())?;
         if bullets.is_empty() {
             continue;
         }

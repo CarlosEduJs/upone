@@ -12,6 +12,10 @@ installers = ["shell", "powershell"]
 # Trigger the release workflow via workflow_dispatch (no tag-push), opening the
 # release implicitly. Our `dispatch-release.yml` drives this after the version PR merges.
 dispatch-releases = true
+# Don't run the Release workflow on PRs at all: releases are only driven by the
+# explicit dispatch after a version bump merges, so PR triggers would waste time
+# building and would run with elevated contents:write permissions.
+pr-run-mode = "skip"
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
 # Where to host releases

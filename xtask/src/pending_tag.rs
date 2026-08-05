@@ -13,7 +13,7 @@ pub fn run() -> Result<()> {
     let packages = cx::load_packages(&root)?;
     let upone = packages.get("upone").context("upone package missing")?;
 
-    let latest_tag = latest_release_tag()?;
+    let latest_tag = latest_release_tag(&root)?;
     let pending = match latest_tag {
         Some(tag) => upone.version > tag,
         None => true,
@@ -26,8 +26,9 @@ pub fn run() -> Result<()> {
 }
 
 /// Returns the highest `vX.Y.Z` tag in the repo, if any.
-fn latest_release_tag() -> Result<Option<semver::Version>> {
+fn latest_release_tag(root: &std::path::Path) -> Result<Option<semver::Version>> {
     let out = Command::new("git")
+        .current_dir(root)
         .args(["tag", "--list", "v[0-9]*"])
         .output()
         .context("run `git tag --list`")?;
