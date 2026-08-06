@@ -3,7 +3,7 @@
 #
 # Usage:
 #   scripts/verify-examples.sh          # dry-run only (no execution)
-#   scripts/verify-examples.sh --exec   # also runs `upone up --yes` in each example
+#   scripts/verify-examples.sh --exec    # also runs `upone up --yes` in each example
 
 set -euo pipefail
 
@@ -16,6 +16,7 @@ echo "== building upone =="
 cargo build -q --manifest-path "$ROOT/Cargo.toml"
 
 fail=0
+skipped=0
 
 check_dry_run() {
   local dir="$1"
@@ -51,17 +52,21 @@ check_dry_run() {
 }
 
 check_exec() {
-  local dir="$1"
-  local name
+  local dir="$1" name rc out
   name="$(basename "$dir")"
 
-  local out
-  out="$(cd "$dir" && "$UPONE" up --yes 2>&1)"
+  # upone now exits non-zero when a task fails; capture the code without
+  # toggling the global `set -e`.
+  if out="$(cd "$dir" && "$UPONE" up --yes 2>&1)"; then
+    rc=0
+  else
+    rc=$?
+  fi
 
-  echo "== [$name] exec =="
+  echo "== [$name] exec (exit $rc) =="
   echo "$out"
 
-  if grep -q "tasks failed" <<<"$out"; then
+  if [[ $rc -ne 0 ]] || grep -q "tasks failed" <<<"$out"; then
     echo "FAIL [$name]: one or more tasks failed"
     fail=1
   else
@@ -70,21 +75,38 @@ check_exec() {
   echo
 }
 
+docker_reachable() { docker info >/dev/null 2>&1; }
+
 for dir in "$ROOT"/examples/*/; do
   name="$(basename "$dir")"
   [[ "$name" == _* ]] && continue # skip shared helpers
 
   case "$name" in
-    rust-hello) check_dry_run "$dir" "check cargo installed" "cargo build" ;;
-    js-pnpm)    check_dry_run "$dir" "check pnpm installed" "pnpm install" ;;
-    js-npm)     check_dry_run "$dir" "check npm installed" "npm install" ;;
-    js-bun)     check_dry_run "$dir" "check bun installed" "bun install" ;;
+    rust-hello)     check_dry_run "$dir" "check cargo installed" "cargo build" ;;
+    js-pnpm)        check_dry_run "$dir" "check pnpm installed" "pnpm install" ;;
+    js-npm)         check_dry_run "$dir" "check npm installed" "npm install" ;;
+    js-bun)         check_dry_run "$dir" "check bun installed" "bun install" ;;
+    stack-docker)   check_dry_run "$dir" "check docker installed" "docker compose up" "verify postgres is running" "verify redis is running" ;;
+    orm-prisma)     check_dry_run "$dir" "check npm installed" "npm install" "prisma generate" ;;
+    orm-drizzle)    check_dry_run "$dir" "check pnpm installed" "pnpm install" "drizzle-kit generate" "verify postgres is running" ;;
+    monorepo-pnpm)  check_dry_run "$dir" "check pnpm installed" "pnpm install" ;;
     *) echo "WARN [$name]: unknown example, skipping"; echo ;;
   esac
 
   if [[ $EXEC -eq 1 ]]; then
     case "$name" in
-      rust-hello|js-pnpm|js-npm|js-bun) check_exec "$dir" ;;
+      rust-hello|js-pnpm|js-npm|js-bun|orm-prisma|monorepo-pnpm)
+        check_exec "$dir" ;;
+      stack-docker|orm-drizzle)
+        if docker_reachable; then
+          check_exec "$dir"
+          # Tear the example down so a later docker example can bind the same
+          # host ports without colliding (both fixtures publish localhost:5432).
+          (cd "$dir" && docker compose down -v >/dev/null 2>&1) || true
+        else
+          skipped=1
+          echo "SKIP [$name] exec: docker not available"; echo
+        fi ;;
       *) : ;;
     esac
   fi
@@ -93,6 +115,11 @@ done
 if [[ $fail -ne 0 ]]; then
   echo "VERIFY FAILED"
   exit 1
+fi
+
+if [[ $skipped -ne 0 ]]; then
+  echo "ALL EXAMPLES VERIFIED (with skipped exec)"
+  exit 0
 fi
 
 echo "ALL EXAMPLES VERIFIED"

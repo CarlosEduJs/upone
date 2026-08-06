@@ -1,0 +1,8 @@
+{
+  "name": "monorepo-pnpm",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm --filter @mono/app run build"
+  }
+}

@@ -1,8 +1,13 @@
 //! PostgreSQL provider: detects postgres in docker-compose (or DATABASE_URL)
 //! and ensures the service is up.
+//!
+//! When a compose file defines the service, the `docker` provider's
+//! `docker compose up -d` is the single owner that starts it; this provider
+//! only depends on that task and verifies the server responds. Without a
+//! compose definition, upone cannot start postgres for you, so it reports a
+//! clear, actionable error instead of firing a broken `docker compose up`.
 
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 use upone_core::detect::Provider;
@@ -10,7 +15,7 @@ use upone_core::plan::{Planner, RunOutcome, Task};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{files_contain, spawn_cmd, which};
+use crate::cmd::{compose_host_port, files_contain};
 
 const COMPOSE_FILES: &[&str] = &[
     "docker-compose.yml",
@@ -52,53 +57,68 @@ impl Provider for Postgres {
         None
     }
 
-    fn plan(&self, _ctx: &Context, planner: &mut Planner<'_>) {
-        let up = Task::new(
-            "postgres-up",
-            "ensure postgres is up",
-            "checks if postgres responds; if not, tries to start it via docker compose",
-        )
-        .risk(Risk::Medium)
-        .run(postgres_ensure);
-
-        planner.add(up);
+    fn plan(&self, ctx: &Context, planner: &mut Planner<'_>) {
+        if files_contain(&ctx.cwd, COMPOSE_FILES, &["postgres", "postgresql"]) {
+            planner.add(
+                Task::new(
+                    "postgres-up",
+                    "verify postgres is running",
+                    "checks that postgres responds after the compose service starts",
+                )
+                .risk(Risk::Low)
+                .depends_on(["docker-up"])
+                .run(postgres_verify),
+            );
+        } else {
+            planner.add(
+                Task::new(
+                    "postgres-up",
+                    "check postgres is running",
+                    "checks that postgres responds on localhost:5432",
+                )
+                .risk(Risk::Low)
+                .run(postgres_check),
+            );
+        }
     }
 }
 
-fn postgres_reachable() -> bool {
+fn postgres_reachable(port: u16) -> bool {
     use std::net::TcpStream;
     TcpStream::connect_timeout(
-        &"127.0.0.1:5432".parse().unwrap(),
+        &format!("127.0.0.1:{port}").parse().unwrap(),
         Duration::from_millis(300),
     )
     .is_ok()
 }
 
-fn postgres_ensure(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    if postgres_reachable() {
-        emit("postgres responding on localhost:5432");
-        return Ok(RunOutcome::Skipped("postgres already up".into()));
-    }
-    if !which("docker") {
-        return Err(RunError::Failed(
-            "postgres is not running on localhost:5432 and docker is not available. Start postgres (e.g. `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres`) and try again.".into(),
-        ));
-    }
-    emit("postgres not responding; starting via docker compose");
-    spawn_cmd(
-        "docker",
-        &["compose", "up", "-d", "postgres"],
-        &ctx.cwd,
-        emit,
-    )?;
-
-    if postgres_reachable() {
-        emit("postgres is now responding");
-        Ok(RunOutcome::Ran("postgres is up".into()))
+/// Compose-backed: the `docker-up` task already started the service; just confirm it responds.
+fn postgres_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
+    let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 5432);
+    if postgres_reachable(port) {
+        emit(&format!("postgres responding on localhost:{port}"));
+        Ok(RunOutcome::Skipped("postgres already up".into()))
     } else {
-        let _ = Command::new("docker").args(["compose", "ps"]).output();
         Err(RunError::Failed(
-            "postgres still not responding after docker compose up. Make sure the service is named 'postgres' in the compose file and check the logs with `docker compose logs postgres`.".into(),
+            format!(
+                "postgres not responding on localhost:{port} after the compose services started. Check `docker compose up -d` / `docker compose logs postgres`."
+            ),
+        ))
+    }
+}
+
+/// No compose definition: nothing here can start postgres, so it reports clearly.
+fn postgres_check(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
+    let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 5432);
+    if postgres_reachable(port) {
+        emit(&format!("postgres responding on localhost:{port}"));
+        Ok(RunOutcome::Skipped("postgres already up".into()))
+    } else {
+        Err(RunError::Failed(
+            format!(
+                "postgres is not responding on localhost:{port} and there is no docker-compose service to start it. \
+                Start it yourself (e.g. `docker run -d -p {port}:5432 -e POSTGRES_PASSWORD=postgres postgres`), then re-run upone."
+            ),
         ))
     }
 }

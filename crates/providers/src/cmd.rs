@@ -30,19 +30,28 @@ pub fn spawn_cmd(
         Ok(RunOutcome::Ran(summary))
     } else {
         // Some tools (e.g. pnpm) report errors on stdout, so fall back to
-        // it when stderr is empty.
+        // it when stderr is empty. Use the tail of the output: the real
+        // failure message usually shows up last (compose pull/start lines
+        // precede the actual error).
         let stderr = String::from_utf8(output.stderr).unwrap_or_default();
-        let detail = stderr
+        let lines: Vec<String> = stderr
             .lines()
             .chain(stdout.lines())
             .map(str::trim)
-            .find(|l| !l.is_empty())
-            .unwrap_or("no output");
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect();
+        let start = lines.len().saturating_sub(3);
+        let detail = lines[start..].join(" | ");
         Err(RunError::Failed(format!(
             "`{} {}` failed: {}",
             program,
             args.join(" "),
-            detail
+            if detail.is_empty() {
+                "no output".to_string()
+            } else {
+                detail
+            }
         )))
     }
 }
@@ -74,6 +83,32 @@ pub fn files_contain(cwd: &Path, files: &[&str], needles: &[&str]) -> bool {
 /// Returns true if any of the files exists in `cwd`.
 pub fn any_exists(cwd: &Path, files: &[&str]) -> bool {
     files.iter().any(|f| cwd.join(f).exists())
+}
+
+/// Resolves the host port a service is published on in the given compose files.
+///
+/// Matches port mappings like `- "15432:5432"` / `- 15432:5432` where the
+/// *container* side equals `container_port` and returns the *host* side, so
+/// providers can verify the real published port instead of assuming 5432/6379.
+/// Falls back to `container_port` when nothing is configured or parseable.
+pub fn compose_host_port(cwd: &Path, files: &[&str], container_port: u16) -> u16 {
+    let needle = format!(":{container_port}");
+    for file in files {
+        let Ok(content) = std::fs::read_to_string(cwd.join(file)) else {
+            continue;
+        };
+        for line in content.lines() {
+            let Some(pos) = line.find(&needle) else {
+                continue;
+            };
+            let mut host = line[..pos].trim();
+            host = host.trim_matches(['"', '\'', '-', ' ', ':', '[', ']', '+']);
+            if let Ok(port) = host.parse::<u16>() {
+                return port;
+            }
+        }
+    }
+    container_port
 }
 
 /// Resolves the JS install task id detected in the project (if any).
