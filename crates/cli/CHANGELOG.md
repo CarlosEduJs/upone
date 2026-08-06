@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Add `upone ready` subcommand for non-invasive environment readiness verification and integrate post-setup readiness sweep into `upone up`.
+- update upone-core 0.2.0 -> 0.3.0
+- update upone-providers 0.2.0 -> 0.3.0
 ## 0.2.0
 
 - Recognize monorepos: detect at the workspace root and every package, run each task in the right package directory, and deduplicate repeated detections.

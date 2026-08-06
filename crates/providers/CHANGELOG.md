@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.0
+
+- Implement readiness checks for postgres, redis, prisma, drizzle, cargo, and better-auth providers, and export collect_readiness_checks helper.
 ## 0.2.0
 
 - Detect across bun/npm/pnpm workspaces: discover package directories and scan them for drizzle, postgres, prisma and the rest.
