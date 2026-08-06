@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::{mpsc, Arc};
 
 use clap::Parser;
-use upone_core::{Context, Detection, Detected, Engine, Event, Report, Task};
+use upone_core::{Context, Detected, Detection, Engine, Event, Report, Task};
 use upone_providers::{build_registry, workspace};
 
 #[derive(Debug, clap::Parser)]

@@ -168,14 +168,13 @@ fn package_json_workspaces(root: &Path) -> Option<Vec<String>> {
             .iter()
             .filter_map(|g| g.as_str().map(String::from))
             .collect(),
-        serde_json::Value::Object(map) => map
-            .get("packages")
-            .and_then(|p| p.as_array())
-            .map(|list| {
+        serde_json::Value::Object(map) => {
+            map.get("packages").and_then(|p| p.as_array()).map(|list| {
                 list.iter()
                     .filter_map(|g| g.as_str().map(String::from))
                     .collect()
-            })?,
+            })?
+        }
         _ => Vec::new(),
     };
     if globs.is_empty() {

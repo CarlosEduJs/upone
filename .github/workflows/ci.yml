@@ -1,0 +1,87 @@
+name: ci
+
+# Validation gate for the main branch and pull requests: formatting, lint,
+# unit tests and the example fixtures (dry-run on every change; full
+# execution when the providers/examples surface is touched).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
+  # Fast smoke: assert the detected plan for every example fixture. No
+  # network, no docker — the dry-run path only reads files and builds the bin.
+  examples-dry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify example plans
+        run: ./scripts/verify-examples.sh
+
+  # Full integration: actually runs the plans (installs deps, starts docker
+  # services, generates). Runs on main and, on PRs, only when the surface
+  # under test changed. Docker examples skip themselves when docker is down.
+  examples-exec:
+    runs-on: ubuntu-latest
+    needs: examples-dry
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect relevant changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - 'crates/**'
+              - 'examples/**'
+              - 'scripts/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+
+      - name: Install bun
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+        uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+
+      - uses: Swatinem/rust-cache@v2
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+
+      - name: Run examples
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+        run: ./scripts/verify-examples.sh --exec
