@@ -45,7 +45,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add crates CHANGELOG.md .changes
+          git add crates CHANGELOG.md .changes Cargo.lock
           git commit -m "chore: release v${VERSION}"
           git push --force-with-lease origin "$BRANCH"
           if gh pr view "$BRANCH" --json number --jq .number >/dev/null 2>&1; then

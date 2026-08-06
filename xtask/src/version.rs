@@ -98,7 +98,15 @@ pub fn run(args: crate::VersionArgs) -> Result<()> {
         set_crate_version(&dir.join("Cargo.toml"), next)?;
     }
 
-    // 2. Re-resolve so Cargo.lock and package versions reflect the bump.
+    // 2. Run cargo check to update Cargo.lock with the new versions.
+    let status = std::process::Command::new("cargo")
+        .current_dir(&root)
+        .arg("check")
+        .status()
+        .context("run cargo check to update Cargo.lock")?;
+    anyhow::ensure!(status.success(), "cargo check failed after version bump");
+
+    // 3. Re-resolve so Cargo.lock and package versions reflect the bump.
     packages = cx::load_packages(&root)?;
 
     // 3. Per-crate changelogs.
