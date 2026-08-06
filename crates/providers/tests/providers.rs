@@ -134,9 +134,9 @@ fn does_not_detect_postgres_without_signature() {
 
 #[test]
 fn prisma_custom_output_readiness_check() {
+    use upone_core::detect::Provider;
     use upone_core::Context;
     use upone_providers::prisma::Prisma;
-    use upone_core::detect::Provider;
 
     let dir = in_dir(
         "prisma-custom",
@@ -161,8 +161,8 @@ fn prisma_custom_output_readiness_check() {
 
 #[test]
 fn collect_readiness_checks_package_scoped() {
-    use upone_core::Context;
     use upone_core::detect::detect;
+    use upone_core::Context;
     use upone_providers::collect_readiness_checks;
 
     let root = in_dir(
@@ -173,14 +173,19 @@ fn collect_readiness_checks_package_scoped() {
                 "packages/db/prisma/schema.prisma",
                 "datasource db { provider = \"postgresql\" }\n",
             ),
-            ("packages/db/packages/db/node_modules/.prisma/client/index.js", "// client"),
+            (
+                "packages/db/packages/db/node_modules/.prisma/client/index.js",
+                "// client",
+            ),
         ],
     );
 
     let reg = build_registry();
     let root_ctx = Context { cwd: root.clone() };
     let db_dir = root.join("packages/db");
-    let db_ctx = Context { cwd: db_dir.clone() };
+    let db_ctx = Context {
+        cwd: db_dir.clone(),
+    };
 
     let db_detections = detect(&db_dir, &reg);
     let pkg_dets = db_detections
