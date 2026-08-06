@@ -104,14 +104,19 @@ impl<'a> Engine<'a> {
 
                 let ctx = self.ctx.clone();
                 let run = task.run.clone();
+                let cwd = task.cwd.clone();
                 entries.push((
                     task.id.clone(),
                     task.label.clone(),
                     std::thread::spawn(move || {
                         let mut emitted: Vec<String> = Vec::new();
                         let mut emit = |line: &str| emitted.push(line.to_string());
+                        let run_ctx = match cwd {
+                            Some(dir) => Context { cwd: dir },
+                            None => ctx,
+                        };
                         let outcome = match run {
-                            Some(run) => run(&ctx, &mut emit),
+                            Some(run) => run(&run_ctx, &mut emit),
                             None => Ok(RunOutcome::Ran("no action".to_string())),
                         };
                         (outcome, emitted)

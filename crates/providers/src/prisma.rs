@@ -29,7 +29,7 @@ impl Provider for Prisma {
     }
 
     fn plan(&self, ctx: &Context, planner: &mut Planner<'_>) {
-        let check = Task::new(
+        let mut check = Task::new(
             "prisma-check",
             "check prisma available",
             "checks dependencies and the prisma CLI",
@@ -47,6 +47,7 @@ impl Provider for Prisma {
         .run(prisma_generate);
 
         if let Some(install) = crate::cmd::js_install_task(&ctx.cwd) {
+            check = check.depends_on([install]);
             gen = gen.depends_on(["prisma-check", install]);
         }
 
@@ -56,7 +57,7 @@ impl Provider for Prisma {
 }
 
 fn check_prisma(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    if !ctx.cwd.join("node_modules").is_dir() {
+    if !crate::cmd::node_modules_present(&ctx.cwd) {
         return Err(RunError::Failed(
             "node_modules missing. Install the project dependencies first (e.g. `upone up` installs them, or run your package manager's install).".into(),
         ));

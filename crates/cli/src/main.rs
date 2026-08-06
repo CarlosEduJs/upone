@@ -3,12 +3,14 @@
 mod report;
 mod tui;
 
+use std::collections::HashSet;
 use std::io::IsTerminal;
+use std::path::Path;
 use std::sync::{mpsc, Arc};
 
 use clap::Parser;
-use upone_core::{Context, Engine, Event, Report};
-use upone_providers::build_registry;
+use upone_core::{Context, Detection, Detected, Engine, Event, Report, Task};
+use upone_providers::{build_registry, workspace};
 
 #[derive(Debug, clap::Parser)]
 #[command(name = "upone", version, about = "prepares development environments")]
@@ -41,17 +43,97 @@ fn main() -> anyhow::Result<()> {
     let ctx = Context { cwd };
 
     let registry = build_registry();
-    let detections = upone_core::detect::detect(&ctx.cwd, &registry);
 
+    // Monorepos: detect at the root and at every workspace package, so a
+    // project where drizzle lives under `packages/db` is still recognized.
+    let root = ctx.cwd.clone();
+    let mut all_dirs = vec![root.clone()];
+    all_dirs.extend(workspace::package_dirs(&root));
+
+    let mut detections = Detected::default();
+    let mut seen: HashSet<(String, String, String)> = HashSet::new();
     let mut planner = upone_core::Planner::new(&ctx);
-    for d in &detections.found {
-        let provider = registry
-            .all()
-            .iter()
-            .find(|p| p.id() == d.provider)
-            .expect("provider registered for detection");
-        provider.plan(&ctx, &mut planner);
+    for dir in &all_dirs {
+        let rel = dir
+            .strip_prefix(&root)
+            .ok()
+            .filter(|rel| !rel.as_os_str().is_empty());
+        let slug = rel.map(dir_slug);
+        let rel_display = rel.map(|r| r.display().to_string());
+        let dir_ctx = Context { cwd: dir.clone() };
+
+        // Plan this directory's providers with its own cwd so tasks built
+        // here know where to run (e.g. `drizzle-kit generate` in packages/db).
+        let dir_detections = upone_core::detect::detect(dir, &registry);
+        let mut sub_planner = upone_core::Planner::new(&dir_ctx);
+        for d in &dir_detections.found {
+            let provider = registry
+                .all()
+                .iter()
+                .find(|p| p.id() == d.provider)
+                .expect("provider registered for detection");
+            provider.plan(&dir_ctx, &mut sub_planner);
+        }
+        // Relaxed: a package may depend on the root install task (bun-install),
+        // which is validated once all plans are merged below.
+        let local_plan = sub_planner
+            .build_allow_external()
+            .map_err(|e| anyhow::anyhow!("failed to build the plan: {e}"))?;
+
+        // Surface detections with their package location in the reason.
+        for d in &dir_detections.found {
+            // Distinct packages may report the same provider+signature (e.g.
+            // two packages with drizzle); keep them separate. Within one
+            // package a provider matches at most once, so no further dedup.
+            let key = (
+                rel_display.clone().unwrap_or_default(),
+                d.provider.to_string(),
+                d.signature.clone(),
+            );
+            if !seen.insert(key) {
+                continue;
+            }
+            let d = d.clone();
+            let reason = match &rel_display {
+                Some(r) => format!("{} ({})", d.reason, r),
+                None => d.reason,
+            };
+            detections.found.push(Detection {
+                provider: d.provider,
+                signature: d.signature,
+                reason,
+            });
+        }
+
+        // Namespace per-package task ids so the same tech in two packages
+        // doesn't collide. Root tasks (install etc.) keep their canonical ids.
+        let local_ids: HashSet<String> = local_plan.ids().into_iter().collect();
+        for id in local_plan.ids() {
+            let task = local_plan.task(&id).cloned().expect("task in plan");
+            let (new_id, new_deps) = match &slug {
+                None => (id, task.deps),
+                Some(s) => (
+                    format!("{s}-{id}"),
+                    task.deps
+                        .into_iter()
+                        .map(|d| {
+                            if local_ids.contains(&d) {
+                                format!("{s}-{d}")
+                            } else {
+                                d
+                            }
+                        })
+                        .collect(),
+                ),
+            };
+            planner.add(Task {
+                id: new_id,
+                deps: new_deps,
+                ..task
+            });
+        }
     }
+
     let plan = planner
         .build()
         .map_err(|e| anyhow::anyhow!("failed to build the plan: {e}"))?;
@@ -100,4 +182,17 @@ fn finish(report: &upone_core::Report) -> anyhow::Result<()> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+/// Turns a relative package path into an injective task-id namespace.
+///
+/// Components are joined with `_` and any `_` inside a component is doubled,
+/// so `packages/db` and a package literally named `packages_db` cannot share
+/// a namespace ("packages_db" vs "packages__db").
+fn dir_slug(rel: &Path) -> String {
+    rel.components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .map(|comp| comp.replace('_', "__"))
+        .collect::<Vec<_>>()
+        .join("_")
 }
