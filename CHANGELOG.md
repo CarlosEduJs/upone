@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.0
+
+Crate versions in this release:
+
+| Crate | Version |
+| --- | --- |
+| upone | 0.2.0 |
+| upone-core | 0.2.0 |
+| upone-providers | 0.2.0 |
+
+### upone
+
+- Recognize monorepos: detect at the workspace root and every package, run each task in the right package directory, and deduplicate repeated detections.
+- update upone-core 0.1.0 -> 0.2.0
+- update upone-providers 0.1.1 -> 0.2.0
+
+### upone-core
+
+- Tasks now carry their working directory, so a plan can mix root and package-level tasks (a monorepo `drizzle-kit generate` runs inside its package).
+- Add `Planner::build_allow_external` so a workspace package can depend on the root install task before plans are merged.
+
+### upone-providers
+
+- Detect across bun/npm/pnpm workspaces: discover package directories and scan them for drizzle, postgres, prisma and the rest.
+- New detection-only providers: turbo, biome, shadcn, next, trpc and better-auth.
+- Drizzle and prisma check tasks now wait for the package-manager install, fixing a race that failed when node_modules was missing.
 ## 0.1.1
 
 Crate versions in this release:
