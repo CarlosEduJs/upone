@@ -85,11 +85,19 @@ fn main() -> anyhow::Result<()> {
     // main thread and print the summary — useful for pipe/CI.
     if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
         let report = start_engine()?;
-        report::summary(&report);
-        return Ok(());
+        return finish(&report);
     }
 
     let report = tui::run(&plan, &rx, yes, start_engine)?;
-    report::summary(&report);
+    finish(&report)
+}
+
+/// Prints the final summary and exits non-zero when any task failed, so
+/// scripts/CI can rely on the exit code.
+fn finish(report: &upone_core::Report) -> anyhow::Result<()> {
+    report::summary(report);
+    if report.has_error() {
+        std::process::exit(1);
+    }
     Ok(())
 }

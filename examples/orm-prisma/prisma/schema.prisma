@@ -1,0 +1,26 @@
+// Prisma schema for the orm-prisma example. Detected by upone via
+// `prisma/schema.prisma`; upone runs `npx prisma generate` after install.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = "postgresql://upone:upone@localhost:5432/upone"
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  posts     Post[]
+}
+
+model Post {
+  id     Int    @id @default(autoincrement())
+  title  String
+  author User   @relation(fields: [authorId], references: [id])
+  authorId Int
+}

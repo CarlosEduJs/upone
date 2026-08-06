@@ -1,8 +1,13 @@
 //! Redis provider: detects redis in docker-compose (or redis.conf) and
 //! ensures the service is up.
+//!
+//! When a compose file defines the service, the `docker` provider's
+//! `docker compose up -d` is the single owner that starts it; this provider
+//! only depends on that task and verifies the server responds. Without a
+//! compose definition, upone cannot start redis for you, so it reports a
+//! clear, actionable error instead of firing a broken `docker compose up`.
 
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 use upone_core::detect::Provider;
@@ -10,7 +15,7 @@ use upone_core::plan::{Planner, RunOutcome, Task};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{files_contain, spawn_cmd, which};
+use crate::cmd::{any_exists, files_contain};
 
 const COMPOSE_FILES: &[&str] = &[
     "docker-compose.yml",
@@ -46,16 +51,29 @@ impl Provider for Redis {
         None
     }
 
-    fn plan(&self, _ctx: &Context, planner: &mut Planner<'_>) {
-        let up = Task::new(
-            "redis-up",
-            "ensure redis is up",
-            "checks if redis responds; if not, tries to start it via docker compose",
-        )
-        .risk(Risk::Medium)
-        .run(redis_ensure);
-
-        planner.add(up);
+    fn plan(&self, ctx: &Context, planner: &mut Planner<'_>) {
+        if any_exists(&ctx.cwd, COMPOSE_FILES) {
+            planner.add(
+                Task::new(
+                    "redis-up",
+                    "verify redis is running",
+                    "checks that redis responds after the compose service starts",
+                )
+                .risk(Risk::Low)
+                .depends_on(["docker-up"])
+                .run(redis_verify),
+            );
+        } else {
+            planner.add(
+                Task::new(
+                    "redis-up",
+                    "check redis is running",
+                    "checks that redis responds on localhost:6379",
+                )
+                .risk(Risk::Low)
+                .run(redis_check),
+            );
+        }
     }
 }
 
@@ -68,26 +86,27 @@ fn redis_reachable() -> bool {
     .is_ok()
 }
 
-fn redis_ensure(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
+/// Compose-backed: the `docker-up` task already started the service; just confirm it responds.
+fn redis_verify(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
     if redis_reachable() {
         emit("redis responding on localhost:6379");
-        return Ok(RunOutcome::Skipped("redis already up".into()));
-    }
-    if !which("docker") {
-        return Err(RunError::Failed(
-            "redis is not running on localhost:6379 and docker is not available. Start redis (e.g. `docker run -d -p 6379:6379 redis`) and try again.".into(),
-        ));
-    }
-    emit("redis not responding; starting via docker compose");
-    spawn_cmd("docker", &["compose", "up", "-d", "redis"], &ctx.cwd, emit)?;
-
-    if redis_reachable() {
-        emit("redis is now responding");
-        Ok(RunOutcome::Ran("redis is up".into()))
+        Ok(RunOutcome::Skipped("redis already up".into()))
     } else {
-        let _ = Command::new("docker").args(["compose", "ps"]).output();
         Err(RunError::Failed(
-            "redis still not responding after docker compose up. Make sure the service is named 'redis' in the compose file and check the logs with `docker compose logs redis`.".into(),
+            "redis not responding on localhost:6379 after the compose services started. Check `docker compose up -d` / `docker compose logs redis`.".into(),
+        ))
+    }
+}
+
+/// No compose definition: nothing here can start redis, so it reports clearly.
+fn redis_check(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
+    if redis_reachable() {
+        emit("redis responding on localhost:6379");
+        Ok(RunOutcome::Skipped("redis already up".into()))
+    } else {
+        Err(RunError::Failed(
+            "redis is not responding on localhost:6379 and there is no docker-compose service to start it. \
+            Start it yourself (e.g. `docker run -d -p 6379:6379 redis`), then re-run upone.".into(),
         ))
     }
 }

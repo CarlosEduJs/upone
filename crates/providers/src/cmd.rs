@@ -30,19 +30,28 @@ pub fn spawn_cmd(
         Ok(RunOutcome::Ran(summary))
     } else {
         // Some tools (e.g. pnpm) report errors on stdout, so fall back to
-        // it when stderr is empty.
+        // it when stderr is empty. Use the tail of the output: the real
+        // failure message usually shows up last (compose pull/start lines
+        // precede the actual error).
         let stderr = String::from_utf8(output.stderr).unwrap_or_default();
-        let detail = stderr
+        let lines: Vec<String> = stderr
             .lines()
             .chain(stdout.lines())
             .map(str::trim)
-            .find(|l| !l.is_empty())
-            .unwrap_or("no output");
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect();
+        let start = lines.len().saturating_sub(3);
+        let detail = lines[start..].join(" | ");
         Err(RunError::Failed(format!(
             "`{} {}` failed: {}",
             program,
             args.join(" "),
-            detail
+            if detail.is_empty() {
+                "no output".to_string()
+            } else {
+                detail
+            }
         )))
     }
 }
