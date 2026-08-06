@@ -57,6 +57,20 @@ jobs:
     needs: examples-dry
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -76,11 +90,19 @@ jobs:
         if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
         uses: oven-sh/setup-bun@v2
 
+      - name: Install pnpm
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+        run: npm install -g pnpm
+
       - uses: dtolnay/rust-toolchain@stable
         if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
 
       - uses: Swatinem/rust-cache@v2
         if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+
+      - name: Wait for postgres
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+        run: until (echo > /dev/tcp/localhost/5432) 2>/dev/null; do sleep 1; done
 
       - name: Run examples
         if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
