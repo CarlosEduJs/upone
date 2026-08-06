@@ -72,7 +72,8 @@ impl Provider for Cargo {
                     } else {
                         ReadinessStatus::NotReady {
                             reason: "Cargo.lock not found".into(),
-                            remedy: "Run 'cargo build' or 'cargo generate-lockfile' to generate it".into(),
+                            remedy: "Run 'cargo build' or 'cargo generate-lockfile' to generate it"
+                                .into(),
                         }
                     }
                 },

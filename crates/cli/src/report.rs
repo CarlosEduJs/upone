@@ -117,7 +117,11 @@ pub fn readiness(report: &upone_core::ReadinessReport) {
     }
 
     println!();
-    let ready = report.results.iter().filter(|r| r.status.is_ready()).count();
+    let ready = report
+        .results
+        .iter()
+        .filter(|r| r.status.is_ready())
+        .count();
     let warnings = report.warnings().len();
     let failures = report.failures().len();
 

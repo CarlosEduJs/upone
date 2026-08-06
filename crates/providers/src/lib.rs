@@ -22,9 +22,7 @@ pub mod workspace;
 use std::collections::HashSet;
 
 use upone_core::detect::Registry;
-use upone_core::readiness::{
-    Importance, ReadinessCheck, ReadinessStatus,
-};
+use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
 use upone_core::{Context, Detection};
 
 /// Registers all bundled providers.
@@ -91,10 +89,7 @@ pub fn collect_readiness_checks(
                 if upone_core::resolve_env_key(&cwd, &key).is_some() {
                     ReadinessStatus::Ready("found".into())
                 } else {
-                    let remedy = format!(
-                        "Add {} to your .env.local or shell environment",
-                        key
-                    );
+                    let remedy = format!("Add {} to your .env.local or shell environment", key);
                     if importance == Importance::Optional {
                         ReadinessStatus::Warning {
                             reason: format!("{} not found (optional)", key),

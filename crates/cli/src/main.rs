@@ -238,11 +238,7 @@ fn cmd_ready(ctx: &Context, registry: &upone_core::Registry) -> anyhow::Result<(
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
 /// Runs the readiness sweep and prints the report.
-fn run_readiness_sweep(
-    ctx: &Context,
-    detections: &Detected,
-    registry: &upone_core::Registry,
-) {
+fn run_readiness_sweep(ctx: &Context, detections: &Detected, registry: &upone_core::Registry) {
     let checks = collect_readiness_checks(ctx, &detections.found, registry);
     if checks.is_empty() {
         return;

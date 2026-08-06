@@ -47,7 +47,8 @@ impl Provider for BetterAuth {
                 } else {
                     ReadinessStatus::NotReady {
                         reason: "BETTER_AUTH_SECRET not found in process env or .env* files".into(),
-                        remedy: "Add BETTER_AUTH_SECRET to your .env.local or shell environment".into(),
+                        remedy: "Add BETTER_AUTH_SECRET to your .env.local or shell environment"
+                            .into(),
                     }
                 }
             },

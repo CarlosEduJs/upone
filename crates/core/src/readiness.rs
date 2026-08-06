@@ -32,16 +32,10 @@ pub enum ReadinessStatus {
     /// The check passed.
     Ready(String),
     /// The check failed on an *optional* requirement — a warning.
-    Warning {
-        reason: String,
-        remedy: String,
-    },
+    Warning { reason: String, remedy: String },
     /// The check failed on a *required* requirement — the environment is not
     /// ready.
-    NotReady {
-        reason: String,
-        remedy: String,
-    },
+    NotReady { reason: String, remedy: String },
 }
 
 impl ReadinessStatus {
@@ -206,9 +200,7 @@ fn parse_dotenv_key(content: &str, key: &str) -> Option<String> {
             continue;
         }
         // Skip `export` prefix.
-        let trimmed = trimmed
-            .strip_prefix("export ")
-            .unwrap_or(trimmed);
+        let trimmed = trimmed.strip_prefix("export ").unwrap_or(trimmed);
 
         if let Some(rest) = trimmed.strip_prefix(key) {
             let rest = rest.trim_start();
@@ -275,9 +267,7 @@ fn parse_env_template(content: &str) -> Vec<EnvRequirement> {
         }
 
         // Strip optional `export` prefix.
-        let trimmed = trimmed
-            .strip_prefix("export ")
-            .unwrap_or(trimmed);
+        let trimmed = trimmed.strip_prefix("export ").unwrap_or(trimmed);
 
         if let Some(eq) = trimmed.find('=') {
             let key = trimmed[..eq].trim().to_string();
@@ -372,8 +362,7 @@ NEXT_PUBLIC_API_URL=https://api.example.com
 
     #[test]
     fn resolve_env_key_from_dotenv_file() {
-        let dir =
-            std::env::temp_dir().join(format!("upone-readiness-env-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("upone-readiness-env-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -386,8 +375,7 @@ NEXT_PUBLIC_API_URL=https://api.example.com
 
     #[test]
     fn env_requirements_from_template_file() {
-        let dir = std::env::temp_dir()
-            .join(format!("upone-readiness-tpl-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("upone-readiness-tpl-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
