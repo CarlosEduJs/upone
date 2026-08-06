@@ -41,6 +41,12 @@ pub trait Provider: Send + Sync {
 
     /// Builds the tasks that prepare the project. Uses `Planner`.
     fn plan(&self, ctx: &Context, planner: &mut Planner<'_>);
+
+    /// Returns readiness checks this provider wants to verify after setup.
+    /// Default: none.
+    fn readiness_checks(&self, _ctx: &Context) -> Vec<crate::readiness::ReadinessCheck> {
+        Vec::new()
+    }
 }
 
 /// List of registered providers.

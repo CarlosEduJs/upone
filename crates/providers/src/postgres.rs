@@ -81,6 +81,49 @@ impl Provider for Postgres {
             );
         }
     }
+
+    fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
+        use upone_core::readiness::*;
+
+        let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 5432);
+        let mut checks = vec![ReadinessCheck::new(
+            "postgres-tcp",
+            format!("postgres (localhost:{})", port),
+            "PostgreSQL is accepting TCP connections",
+            Importance::Required,
+            move |_ctx| {
+                if postgres_reachable(port) {
+                    ReadinessStatus::Ready(format!("responding on localhost:{}", port))
+                } else {
+                    ReadinessStatus::NotReady {
+                        reason: format!("postgres not responding on localhost:{}", port),
+                        remedy: "Run 'docker compose up -d' or check if the postgres container is running".into(),
+                    }
+                }
+            },
+        )];
+
+        // DATABASE_URL env key check.
+        let cwd = ctx.cwd.clone();
+        checks.push(ReadinessCheck::new(
+            "env-DATABASE_URL",
+            "DATABASE_URL",
+            "DATABASE_URL environment variable is set",
+            Importance::Required,
+            move |_ctx| {
+                if upone_core::resolve_env_key(&cwd, "DATABASE_URL").is_some() {
+                    ReadinessStatus::Ready("found".into())
+                } else {
+                    ReadinessStatus::NotReady {
+                        reason: "DATABASE_URL not found in process env or .env* files".into(),
+                        remedy: "Add DATABASE_URL to your .env.local or shell environment".into(),
+                    }
+                }
+            },
+        ));
+
+        checks
+    }
 }
 
 fn postgres_reachable(port: u16) -> bool {

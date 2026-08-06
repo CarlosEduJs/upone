@@ -45,8 +45,13 @@ pub struct Detection {
 
 pub mod detect;
 pub mod plan;
+pub mod readiness;
 pub mod run;
 
 pub use detect::{detect, Detected, Provider, Registry};
 pub use plan::{Plan, Planner, RunOutcome, Task, TaskId};
+pub use readiness::{
+    env_requirements_from_template, resolve_env_key, sweep, EnvRequirement, Importance,
+    ReadinessCheck, ReadinessReport, ReadinessResult, ReadinessStatus,
+};
 pub use run::{Engine, Event, Report, RunError, Step, StepStatus};

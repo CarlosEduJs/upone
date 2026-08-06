@@ -54,6 +54,69 @@ impl Provider for Prisma {
         planner.add(check);
         planner.add(gen);
     }
+
+    fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
+        use upone_core::readiness::*;
+
+        let cwd = ctx.cwd.clone();
+        let (output_dir, display_rel) = resolve_prisma_output_dir(&cwd);
+
+        vec![ReadinessCheck::new(
+            "prisma-client",
+            "prisma client generated",
+            format!("Prisma client exists in {}", display_rel),
+            Importance::Required,
+            move |_ctx| {
+                let has_marker = output_dir.join("index.js").is_file()
+                    || output_dir.join("index.d.ts").is_file()
+                    || output_dir.join("index.mjs").is_file();
+                if has_marker {
+                    ReadinessStatus::Ready("prisma client present".into())
+                } else {
+                    ReadinessStatus::NotReady {
+                        reason: format!("prisma client not found in {}", display_rel),
+                        remedy: "Run 'npx prisma generate' or 'upone up'".into(),
+                    }
+                }
+            },
+        )]
+    }
+}
+
+/// Resolves the Prisma client output directory from `prisma/schema.prisma`
+/// if specified via `output = "..."`, otherwise defaults to `node_modules/.prisma/client`.
+fn resolve_prisma_output_dir(cwd: &Path) -> (std::path::PathBuf, String) {
+    let schema_path = cwd.join("prisma").join("schema.prisma");
+    if let Ok(content) = std::fs::read_to_string(&schema_path) {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("output") {
+                if let Some(eq) = trimmed.find('=') {
+                    let val = trimmed[eq + 1..].trim();
+                    let raw_val = if (val.starts_with('"') && val.ends_with('"'))
+                        || (val.starts_with('\'') && val.ends_with('\''))
+                    {
+                        &val[1..val.len() - 1]
+                    } else {
+                        val
+                    };
+                    if !raw_val.is_empty() {
+                        let schema_dir = cwd.join("prisma");
+                        let resolved = schema_dir.join(raw_val);
+                        let rel = resolved
+                            .strip_prefix(cwd)
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|_| raw_val.to_string());
+                        return (resolved, rel);
+                    }
+                }
+            }
+        }
+    }
+    (
+        cwd.join("node_modules/.prisma/client"),
+        "node_modules/.prisma/client".to_string(),
+    )
 }
 
 fn check_prisma(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {

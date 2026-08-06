@@ -31,4 +31,27 @@ impl Provider for BetterAuth {
     }
 
     fn plan(&self, _ctx: &Context, _planner: &mut Planner<'_>) {}
+
+    fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
+        use upone_core::readiness::*;
+
+        let cwd = ctx.cwd.clone();
+        vec![ReadinessCheck::new(
+            "env-BETTER_AUTH_SECRET",
+            "BETTER_AUTH_SECRET",
+            "BETTER_AUTH_SECRET environment variable is set",
+            Importance::Required,
+            move |_ctx| {
+                if upone_core::resolve_env_key(&cwd, "BETTER_AUTH_SECRET").is_some() {
+                    ReadinessStatus::Ready("found".into())
+                } else {
+                    ReadinessStatus::NotReady {
+                        reason: "BETTER_AUTH_SECRET not found in process env or .env* files".into(),
+                        remedy: "Add BETTER_AUTH_SECRET to your .env.local or shell environment"
+                            .into(),
+                    }
+                }
+            },
+        )]
+    }
 }

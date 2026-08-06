@@ -29,6 +29,19 @@ pub fn is_workspace(root: &Path) -> bool {
     !package_dirs(root).is_empty()
 }
 
+/// Turns a relative package path into an injective task-id namespace.
+///
+/// Components are joined with `_` and any `_` inside a component is doubled,
+/// so `packages/db` and a package literally named `packages_db` cannot share
+/// a namespace ("packages_db" vs "packages__db").
+pub fn dir_slug(rel: &Path) -> String {
+    rel.components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .map(|comp| comp.replace('_', "__"))
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
 /// Expands workspace globs into package dirs that live inside the canonical
 /// root (guards against `..`, absolute components and symlink escapes), then
 /// drops candidates matched by `!exclusion` patterns.
