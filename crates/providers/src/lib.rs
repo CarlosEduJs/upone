@@ -46,21 +46,35 @@ pub fn build_registry() -> Registry {
     reg
 }
 
-/// Collects all readiness checks from detected providers and `.env.example`
-/// template keys. Provider-inferred checks come first, then any template
-/// keys that weren't already covered by a provider check.
+/// Collects all readiness checks from detected providers (evaluated in their
+/// respective package contexts) and `.env.example` template keys across all
+/// package directories.
 pub fn collect_readiness_checks(
-    ctx: &Context,
-    detections: &[Detection],
+    root_ctx: &Context,
+    package_detections: &[(&Context, &Detection)],
     registry: &Registry,
 ) -> Vec<ReadinessCheck> {
     let mut checks: Vec<ReadinessCheck> = Vec::new();
     let mut seen_ids: HashSet<String> = HashSet::new();
 
-    // Provider-inferred checks.
-    for d in detections {
+    // 1. Provider-inferred checks (evaluated per package context).
+    for (pkg_ctx, d) in package_detections {
         if let Some(provider) = registry.all().iter().find(|p| p.id() == d.provider) {
-            for check in provider.readiness_checks(ctx) {
+            let rel = pkg_ctx
+                .cwd
+                .strip_prefix(&root_ctx.cwd)
+                .ok()
+                .filter(|r| !r.as_os_str().is_empty());
+            let slug = rel.map(workspace::dir_slug);
+            let rel_display = rel.map(|r| r.display().to_string());
+
+            for mut check in provider.readiness_checks(pkg_ctx) {
+                if let Some(s) = &slug {
+                    check.id = format!("{s}-{}", check.id);
+                    if let Some(r) = &rel_display {
+                        check.label = format!("{} ({})", check.label, r);
+                    }
+                }
                 if seen_ids.insert(check.id.clone()) {
                     checks.push(check);
                 }
@@ -68,42 +82,65 @@ pub fn collect_readiness_checks(
         }
     }
 
-    // `.env.example` / `.env.template` keys.
-    let template_reqs = upone_core::env_requirements_from_template(&ctx.cwd);
-    for req in template_reqs {
-        let id = format!("env-{}", req.key);
-        if seen_ids.contains(&id) {
-            // Already covered by a provider check (e.g. DATABASE_URL from postgres).
-            continue;
+    // 2. `.env.example` / `.env.template` keys per unique package directory.
+    let mut unique_dirs: Vec<&Context> = vec![root_ctx];
+    for (pkg_ctx, _) in package_detections {
+        if !unique_dirs.iter().any(|c| c.cwd == pkg_ctx.cwd) {
+            unique_dirs.push(pkg_ctx);
         }
-        seen_ids.insert(id.clone());
-        let key = req.key.clone();
-        let importance = req.importance;
-        let cwd = ctx.cwd.clone();
-        checks.push(ReadinessCheck::new(
-            id,
-            key.clone(),
-            format!("{} environment variable", key),
-            importance,
-            move |_ctx| {
-                if upone_core::resolve_env_key(&cwd, &key).is_some() {
-                    ReadinessStatus::Ready("found".into())
-                } else {
-                    let remedy = format!("Add {} to your .env.local or shell environment", key);
-                    if importance == Importance::Optional {
-                        ReadinessStatus::Warning {
-                            reason: format!("{} not found (optional)", key),
-                            remedy,
-                        }
+    }
+
+    for dir_ctx in unique_dirs {
+        let rel = dir_ctx
+            .cwd
+            .strip_prefix(&root_ctx.cwd)
+            .ok()
+            .filter(|r| !r.as_os_str().is_empty());
+        let slug = rel.map(workspace::dir_slug);
+        let rel_display = rel.map(|r| r.display().to_string());
+
+        let template_reqs = upone_core::env_requirements_from_template(&dir_ctx.cwd);
+        for req in template_reqs {
+            let (id, label) = match (&slug, &rel_display) {
+                (Some(s), Some(r)) => (
+                    format!("{s}-env-{}", req.key),
+                    format!("{} ({})", req.key, r),
+                ),
+                _ => (format!("env-{}", req.key), req.key.clone()),
+            };
+
+            if seen_ids.contains(&id) {
+                continue;
+            }
+            seen_ids.insert(id.clone());
+            let key = req.key.clone();
+            let importance = req.importance;
+            let cwd = dir_ctx.cwd.clone();
+            checks.push(ReadinessCheck::new(
+                id,
+                label,
+                format!("{} environment variable", key),
+                importance,
+                move |_ctx| {
+                    if upone_core::resolve_env_key(&cwd, &key).is_some() {
+                        ReadinessStatus::Ready("found".into())
                     } else {
-                        ReadinessStatus::NotReady {
-                            reason: format!("{} not found in process env or .env* files", key),
-                            remedy,
+                        let remedy = format!("Add {} to your .env.local or shell environment", key);
+                        if importance == Importance::Optional {
+                            ReadinessStatus::Warning {
+                                reason: format!("{} not found (optional)", key),
+                                remedy,
+                            }
+                        } else {
+                            ReadinessStatus::NotReady {
+                                reason: format!("{} not found in process env or .env* files", key),
+                                remedy,
+                            }
                         }
                     }
-                }
-            },
-        ));
+                },
+            ));
+        }
     }
 
     checks

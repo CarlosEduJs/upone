@@ -131,3 +131,65 @@ fn does_not_detect_postgres_without_signature() {
     assert!(!ids(&dir).contains(&"postgres".to_string()));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn prisma_custom_output_readiness_check() {
+    use upone_core::Context;
+    use upone_providers::prisma::Prisma;
+    use upone_core::detect::Provider;
+
+    let dir = in_dir(
+        "prisma-custom",
+        &[
+            (
+                "prisma/schema.prisma",
+                "generator client {\n  provider = \"prisma-client-js\"\n  output = \"../src/generated/client\"\n}\n",
+            ),
+            ("src/generated/client/index.js", "// generated client"),
+        ],
+    );
+    let ctx = Context { cwd: dir.clone() };
+    let p = Prisma;
+    let checks = p.readiness_checks(&ctx);
+    assert_eq!(checks.len(), 1);
+    assert_eq!(checks[0].id, "prisma-client");
+
+    let status = (checks[0].check_fn)(&ctx);
+    assert!(status.is_ready());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn collect_readiness_checks_package_scoped() {
+    use upone_core::Context;
+    use upone_core::detect::detect;
+    use upone_providers::collect_readiness_checks;
+
+    let root = in_dir(
+        "ws-readiness",
+        &[
+            ("package.json", "{\"workspaces\":[\"packages/*\"]}"),
+            (
+                "packages/db/prisma/schema.prisma",
+                "datasource db { provider = \"postgresql\" }\n",
+            ),
+            ("packages/db/packages/db/node_modules/.prisma/client/index.js", "// client"),
+        ],
+    );
+
+    let reg = build_registry();
+    let root_ctx = Context { cwd: root.clone() };
+    let db_dir = root.join("packages/db");
+    let db_ctx = Context { cwd: db_dir.clone() };
+
+    let db_detections = detect(&db_dir, &reg);
+    let pkg_dets = db_detections
+        .found
+        .iter()
+        .map(|d| (&db_ctx, d))
+        .collect::<Vec<_>>();
+
+    let checks = collect_readiness_checks(&root_ctx, &pkg_dets, &reg);
+    assert!(checks.iter().any(|c| c.id.starts_with("packages_db-")));
+    let _ = std::fs::remove_dir_all(&root);
+}

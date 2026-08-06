@@ -206,11 +206,15 @@ fn parse_dotenv_key(content: &str, key: &str) -> Option<String> {
             let rest = rest.trim_start();
             if let Some(val) = rest.strip_prefix('=') {
                 let val = val.trim();
-                // Strip surrounding quotes.
-                let val = if (val.starts_with('"') && val.ends_with('"'))
-                    || (val.starts_with('\'') && val.ends_with('\''))
+                // Strip surrounding quotes if matching and valid (len >= 2).
+                let val = if val.len() >= 2
+                    && ((val.starts_with('"') && val.ends_with('"'))
+                        || (val.starts_with('\'') && val.ends_with('\'')))
                 {
                     &val[1..val.len() - 1]
+                } else if val.starts_with('"') || val.starts_with('\'') {
+                    // Unmatched or malformed quote (e.g. lone opening quote) -> invalid
+                    ""
                 } else {
                     val
                 };
@@ -315,6 +319,15 @@ EMPTY=
         // Empty values should return None.
         assert_eq!(parse_dotenv_key(content, "EMPTY"), None);
         assert_eq!(parse_dotenv_key(content, "MISSING"), None);
+    }
+
+    #[test]
+    fn parse_dotenv_malformed_quotes() {
+        let content = "LONE_QUOTE=\"\nLONE_SINGLE=' \nUNMATCHED=\"foo\nEMPTY_QUOTES=\"\"\n";
+        assert_eq!(parse_dotenv_key(content, "LONE_QUOTE"), None);
+        assert_eq!(parse_dotenv_key(content, "LONE_SINGLE"), None);
+        assert_eq!(parse_dotenv_key(content, "UNMATCHED"), None);
+        assert_eq!(parse_dotenv_key(content, "EMPTY_QUOTES"), None);
     }
 
     #[test]

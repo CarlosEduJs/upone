@@ -5,7 +5,6 @@ mod tui;
 
 use std::collections::HashSet;
 use std::io::IsTerminal;
-use std::path::Path;
 use std::sync::{mpsc, Arc};
 
 use clap::Parser;
@@ -62,6 +61,7 @@ fn cmd_up(
     all_dirs.extend(workspace::package_dirs(&root));
 
     let mut detections = Detected::default();
+    let mut pkg_detections: Vec<(Context, Detection)> = Vec::new();
     let mut seen: HashSet<(String, String, String)> = HashSet::new();
     let mut planner = upone_core::Planner::new(ctx);
     for dir in &all_dirs {
@@ -69,7 +69,7 @@ fn cmd_up(
             .strip_prefix(&root)
             .ok()
             .filter(|rel| !rel.as_os_str().is_empty());
-        let slug = rel.map(dir_slug);
+        let slug = rel.map(workspace::dir_slug);
         let rel_display = rel.map(|r| r.display().to_string());
         let dir_ctx = Context { cwd: dir.clone() };
 
@@ -104,6 +104,7 @@ fn cmd_up(
             if !seen.insert(key) {
                 continue;
             }
+            pkg_detections.push((dir_ctx.clone(), d.clone()));
             let d = d.clone();
             let reason = match &rel_display {
                 Some(r) => format!("{} ({})", d.reason, r),
@@ -174,6 +175,9 @@ fn cmd_up(
         Ok::<_, anyhow::Error>(report)
     };
 
+    let pkg_det_refs: Vec<(&Context, &Detection)> =
+        pkg_detections.iter().map(|(c, d)| (c, d)).collect();
+
     // If stdin/stdout are not terminals, run directly (no TUI) on the
     // main thread and print the summary — useful for pipe/CI.
     if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
@@ -181,7 +185,7 @@ fn cmd_up(
         finish(&report)?;
 
         // Post-setup readiness sweep.
-        run_readiness_sweep(ctx, &detections, registry);
+        run_readiness_sweep(ctx, &pkg_det_refs, registry);
         return Ok(());
     }
 
@@ -189,7 +193,7 @@ fn cmd_up(
     finish(&report)?;
 
     // Post-setup readiness sweep.
-    run_readiness_sweep(ctx, &detections, registry);
+    run_readiness_sweep(ctx, &pkg_det_refs, registry);
     Ok(())
 }
 
@@ -200,25 +204,38 @@ fn cmd_ready(ctx: &Context, registry: &upone_core::Registry) -> anyhow::Result<(
     let mut all_dirs = vec![root.clone()];
     all_dirs.extend(workspace::package_dirs(&root));
 
-    let mut all_detections: Vec<Detection> = Vec::new();
-    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut pkg_detections: Vec<(Context, Detection)> = Vec::new();
+    let mut seen: HashSet<(String, String, String)> = HashSet::new();
 
     for dir in &all_dirs {
+        let rel_display = dir
+            .strip_prefix(&root)
+            .ok()
+            .filter(|rel| !rel.as_os_str().is_empty())
+            .map(|r| r.display().to_string());
+        let dir_ctx = Context { cwd: dir.clone() };
         let dir_detections = upone_core::detect::detect(dir, registry);
         for d in dir_detections.found {
-            let key = (d.provider.to_string(), d.signature.clone());
+            let key = (
+                rel_display.clone().unwrap_or_default(),
+                d.provider.to_string(),
+                d.signature.clone(),
+            );
             if seen.insert(key) {
-                all_detections.push(d);
+                pkg_detections.push((dir_ctx.clone(), d));
             }
         }
     }
 
-    if all_detections.is_empty() {
+    if pkg_detections.is_empty() {
         report::no_project(ctx);
         return Ok(());
     }
 
-    let checks = collect_readiness_checks(ctx, &all_detections, registry);
+    let pkg_det_refs: Vec<(&Context, &Detection)> =
+        pkg_detections.iter().map(|(c, d)| (c, d)).collect();
+
+    let checks = collect_readiness_checks(ctx, &pkg_det_refs, registry);
     if checks.is_empty() {
         println!();
         println!("  no readiness checks applicable for detected technologies.");
@@ -238,8 +255,12 @@ fn cmd_ready(ctx: &Context, registry: &upone_core::Registry) -> anyhow::Result<(
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
 /// Runs the readiness sweep and prints the report.
-fn run_readiness_sweep(ctx: &Context, detections: &Detected, registry: &upone_core::Registry) {
-    let checks = collect_readiness_checks(ctx, &detections.found, registry);
+fn run_readiness_sweep(
+    ctx: &Context,
+    package_detections: &[(&Context, &Detection)],
+    registry: &upone_core::Registry,
+) {
+    let checks = collect_readiness_checks(ctx, package_detections, registry);
     if checks.is_empty() {
         return;
     }
@@ -255,17 +276,4 @@ fn finish(report: &upone_core::Report) -> anyhow::Result<()> {
         std::process::exit(1);
     }
     Ok(())
-}
-
-/// Turns a relative package path into an injective task-id namespace.
-///
-/// Components are joined with `_` and any `_` inside a component is doubled,
-/// so `packages/db` and a package literally named `packages_db` cannot share
-/// a namespace ("packages_db" vs "packages__db").
-fn dir_slug(rel: &Path) -> String {
-    rel.components()
-        .filter_map(|c| c.as_os_str().to_str())
-        .map(|comp| comp.replace('_', "__"))
-        .collect::<Vec<_>>()
-        .join("_")
 }
