@@ -3,13 +3,12 @@ name: orm-drizzle
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: orm-drizzle-postgres
     environment:
       POSTGRES_USER: upone
       POSTGRES_PASSWORD: upone
       POSTGRES_DB: upone
     ports:
-      - "5432:5432"
+      - "25432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:

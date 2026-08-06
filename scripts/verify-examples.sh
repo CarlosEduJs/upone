@@ -16,6 +16,7 @@ echo "== building upone =="
 cargo build -q --manifest-path "$ROOT/Cargo.toml"
 
 fail=0
+skipped=0
 
 check_dry_run() {
   local dir="$1"
@@ -54,12 +55,13 @@ check_exec() {
   local dir="$1" name rc out
   name="$(basename "$dir")"
 
-  # upone now exits non-zero when a task fails; capture the code instead of
-  # letting `set -e` abort the whole run.
-  set +e
-  out="$(cd "$dir" && "$UPONE" up --yes 2>&1)"
-  rc=$?
-  set -e
+  # upone now exits non-zero when a task fails; capture the code without
+  # toggling the global `set -e`.
+  if out="$(cd "$dir" && "$UPONE" up --yes 2>&1)"; then
+    rc=0
+  else
+    rc=$?
+  fi
 
   echo "== [$name] exec (exit $rc) =="
   echo "$out"
@@ -98,7 +100,11 @@ for dir in "$ROOT"/examples/*/; do
       stack-docker|orm-drizzle)
         if docker_reachable; then
           check_exec "$dir"
+          # Tear the example down so a later docker example can bind the same
+          # host ports without colliding (both fixtures publish localhost:5432).
+          (cd "$dir" && docker compose down -v >/dev/null 2>&1) || true
         else
+          skipped=1
           echo "SKIP [$name] exec: docker not available"; echo
         fi ;;
       *) : ;;
@@ -109,6 +115,11 @@ done
 if [[ $fail -ne 0 ]]; then
   echo "VERIFY FAILED"
   exit 1
+fi
+
+if [[ $skipped -ne 0 ]]; then
+  echo "ALL EXAMPLES VERIFIED (with skipped exec)"
+  exit 0
 fi
 
 echo "ALL EXAMPLES VERIFIED"

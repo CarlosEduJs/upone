@@ -15,7 +15,7 @@ use upone_core::plan::{Planner, RunOutcome, Task};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{any_exists, files_contain};
+use crate::cmd::{compose_host_port, files_contain};
 
 const COMPOSE_FILES: &[&str] = &[
     "docker-compose.yml",
@@ -52,7 +52,7 @@ impl Provider for Redis {
     }
 
     fn plan(&self, ctx: &Context, planner: &mut Planner<'_>) {
-        if any_exists(&ctx.cwd, COMPOSE_FILES) {
+        if files_contain(&ctx.cwd, COMPOSE_FILES, &["redis", "redislabs/redis"]) {
             planner.add(
                 Task::new(
                     "redis-up",
@@ -77,36 +77,42 @@ impl Provider for Redis {
     }
 }
 
-fn redis_reachable() -> bool {
+fn redis_reachable(port: u16) -> bool {
     use std::net::TcpStream;
     TcpStream::connect_timeout(
-        &"127.0.0.1:6379".parse().unwrap(),
+        &format!("127.0.0.1:{port}").parse().unwrap(),
         Duration::from_millis(300),
     )
     .is_ok()
 }
 
 /// Compose-backed: the `docker-up` task already started the service; just confirm it responds.
-fn redis_verify(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    if redis_reachable() {
-        emit("redis responding on localhost:6379");
+fn redis_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
+    let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 6379);
+    if redis_reachable(port) {
+        emit(&format!("redis responding on localhost:{port}"));
         Ok(RunOutcome::Skipped("redis already up".into()))
     } else {
         Err(RunError::Failed(
-            "redis not responding on localhost:6379 after the compose services started. Check `docker compose up -d` / `docker compose logs redis`.".into(),
+            format!(
+                "redis not responding on localhost:{port} after the compose services started. Check `docker compose up -d` / `docker compose logs redis`."
+            ),
         ))
     }
 }
 
 /// No compose definition: nothing here can start redis, so it reports clearly.
-fn redis_check(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    if redis_reachable() {
-        emit("redis responding on localhost:6379");
+fn redis_check(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
+    let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 6379);
+    if redis_reachable(port) {
+        emit(&format!("redis responding on localhost:{port}"));
         Ok(RunOutcome::Skipped("redis already up".into()))
     } else {
         Err(RunError::Failed(
-            "redis is not responding on localhost:6379 and there is no docker-compose service to start it. \
-            Start it yourself (e.g. `docker run -d -p 6379:6379 redis`), then re-run upone.".into(),
+            format!(
+                "redis is not responding on localhost:{port} and there is no docker-compose service to start it. \
+                Start it yourself (e.g. `docker run -d -p {port}:6379 redis`), then re-run upone."
+            ),
         ))
     }
 }

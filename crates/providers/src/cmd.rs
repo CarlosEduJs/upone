@@ -85,6 +85,32 @@ pub fn any_exists(cwd: &Path, files: &[&str]) -> bool {
     files.iter().any(|f| cwd.join(f).exists())
 }
 
+/// Resolves the host port a service is published on in the given compose files.
+///
+/// Matches port mappings like `- "15432:5432"` / `- 15432:5432` where the
+/// *container* side equals `container_port` and returns the *host* side, so
+/// providers can verify the real published port instead of assuming 5432/6379.
+/// Falls back to `container_port` when nothing is configured or parseable.
+pub fn compose_host_port(cwd: &Path, files: &[&str], container_port: u16) -> u16 {
+    let needle = format!(":{container_port}");
+    for file in files {
+        let Ok(content) = std::fs::read_to_string(cwd.join(file)) else {
+            continue;
+        };
+        for line in content.lines() {
+            let Some(pos) = line.find(&needle) else {
+                continue;
+            };
+            let mut host = line[..pos].trim();
+            host = host.trim_matches(['"', '\'', '-', ' ', ':', '[', ']', '+']);
+            if let Ok(port) = host.parse::<u16>() {
+                return port;
+            }
+        }
+    }
+    container_port
+}
+
 /// Resolves the JS install task id detected in the project (if any).
 /// Used by providers that depend on node_modules (prisma, drizzle).
 pub fn js_install_task(cwd: &Path) -> Option<&'static str> {
