@@ -42,7 +42,7 @@ impl Provider for BetterAuth {
             "BETTER_AUTH_SECRET environment variable is set",
             Importance::Required,
             move |_ctx| {
-                if upone_core::resolve_env_key(&cwd, "BETTER_AUTH_SECRET").is_some() {
+                if resolve_env_key(&cwd, "BETTER_AUTH_SECRET").is_some() {
                     ReadinessStatus::Ready("found".into())
                 } else {
                     ReadinessStatus::NotReady {

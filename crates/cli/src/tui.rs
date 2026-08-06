@@ -162,7 +162,7 @@ fn apply_event(state: &mut HashMap<String, TaskUi>, ev: CoreEvent) {
     }
 }
 
-fn ui(f: &mut Frame, app: &App) {
+fn ui(f: &mut Frame<'_>, app: &App) {
     let area = f.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -185,7 +185,7 @@ fn ui(f: &mut Frame, app: &App) {
     .block(Block::default().borders(Borders::ALL));
     f.render_widget(header, chunks[0]);
 
-    let mut lines: Vec<Line> = Vec::new();
+    let mut lines: Vec<Line<'_>> = Vec::new();
     for task in &app.tasks {
         let state = app.state.get(&task.id).unwrap_or(&TaskUi::Pending);
         let (icon, color) = match state {

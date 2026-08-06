@@ -111,7 +111,7 @@ impl Provider for Postgres {
             "DATABASE_URL environment variable is set",
             Importance::Required,
             move |_ctx| {
-                if upone_core::resolve_env_key(&cwd, "DATABASE_URL").is_some() {
+                if resolve_env_key(&cwd, "DATABASE_URL").is_some() {
                     ReadinessStatus::Ready("found".into())
                 } else {
                     ReadinessStatus::NotReady {

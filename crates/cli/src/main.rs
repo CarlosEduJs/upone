@@ -270,7 +270,7 @@ fn run_readiness_sweep(
 
 /// Prints the final summary and exits non-zero when any task failed, so
 /// scripts/CI can rely on the exit code.
-fn finish(report: &upone_core::Report) -> anyhow::Result<()> {
+fn finish(report: &Report) -> anyhow::Result<()> {
     report::summary(report);
     if report.has_error() {
         std::process::exit(1);

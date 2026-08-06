@@ -1,6 +1,8 @@
 //! Provider detection tests (npm, pnpm, docker, prisma, drizzle,
 //! postgres by content, redis by content).
 
+#![allow(unused_crate_dependencies)]
+
 use upone_core::detect::detect;
 use upone_providers::build_registry;
 

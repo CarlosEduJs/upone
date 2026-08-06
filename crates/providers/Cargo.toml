@@ -5,7 +5,9 @@ edition = "2021"
 license = "MIT"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 upone-core.workspace = true
-anyhow.workspace = true
 serde_json.workspace = true
