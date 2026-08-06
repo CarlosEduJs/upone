@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.0
+
+- Add minimal environment readiness validation layer abstractions (ReadinessCheck, ReadinessStatus, ReadinessReport, sweep), .env* key resolver, and .env.example parser. Extend Provider trait with readiness_checks.
 ## 0.2.0
 
 - Tasks now carry their working directory, so a plan can mix root and package-level tasks (a monorepo `drizzle-kit generate` runs inside its package).

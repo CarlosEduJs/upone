@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.0
+
+Crate versions in this release:
+
+| Crate | Version |
+| --- | --- |
+| upone | 0.3.0 |
+| upone-core | 0.3.0 |
+| upone-providers | 0.3.0 |
+
+### upone
+
+- Add `upone ready` subcommand for non-invasive environment readiness verification and integrate post-setup readiness sweep into `upone up`.
+- update upone-core 0.2.0 -> 0.3.0
+- update upone-providers 0.2.0 -> 0.3.0
+
+### upone-core
+
+- Add minimal environment readiness validation layer abstractions (ReadinessCheck, ReadinessStatus, ReadinessReport, sweep), .env* key resolver, and .env.example parser. Extend Provider trait with readiness_checks.
+
+### upone-providers
+
+- Implement readiness checks for postgres, redis, prisma, drizzle, cargo, and better-auth providers, and export collect_readiness_checks helper.
 ## 0.2.0
 
 Crate versions in this release:
