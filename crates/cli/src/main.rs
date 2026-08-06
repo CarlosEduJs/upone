@@ -1,5 +1,7 @@
 //! `upone` — prepares development environments with a single command.
 
+#![allow(clippy::print_stdout)]
+
 mod report;
 mod tui;
 
@@ -42,12 +44,16 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::Up { dry_run, yes } => cmd_up(&ctx, &registry, dry_run, yes),
-        Command::Ready => cmd_ready(&ctx, &registry),
+        Command::Ready => {
+            cmd_ready(&ctx, &registry);
+            Ok(())
+        }
     }
 }
 
 // ── upone up ────────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn cmd_up(
     ctx: &Context,
     registry: &upone_core::Registry,
@@ -78,12 +84,9 @@ fn cmd_up(
         let dir_detections = upone_core::detect::detect(dir, registry);
         let mut sub_planner = upone_core::Planner::new(&dir_ctx);
         for d in &dir_detections.found {
-            let provider = registry
-                .all()
-                .iter()
-                .find(|p| p.id() == d.provider)
-                .expect("provider registered for detection");
-            provider.plan(&dir_ctx, &mut sub_planner);
+            if let Some(provider) = registry.all().iter().find(|p| p.id() == d.provider) {
+                provider.plan(&dir_ctx, &mut sub_planner);
+            }
         }
         // Relaxed: a package may depend on the root install task (bun-install),
         // which is validated once all plans are merged below.
@@ -107,7 +110,7 @@ fn cmd_up(
             pkg_detections.push((dir_ctx.clone(), d.clone()));
             let d = d.clone();
             let reason = match &rel_display {
-                Some(r) => format!("{} ({})", d.reason, r),
+                Some(r) => format!("{0} ({r})", d.reason),
                 None => d.reason,
             };
             detections.found.push(Detection {
@@ -121,7 +124,9 @@ fn cmd_up(
         // doesn't collide. Root tasks (install etc.) keep their canonical ids.
         let local_ids: HashSet<String> = local_plan.ids().into_iter().collect();
         for id in local_plan.ids() {
-            let task = local_plan.task(&id).cloned().expect("task in plan");
+            let Some(task) = local_plan.task(&id).cloned() else {
+                continue;
+            };
             let (new_id, new_deps) = match &slug {
                 None => (id, task.deps),
                 Some(s) => (
@@ -182,7 +187,7 @@ fn cmd_up(
     // main thread and print the summary — useful for pipe/CI.
     if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
         let report = start_engine()?;
-        finish(&report)?;
+        finish(&report);
 
         // Post-setup readiness sweep.
         run_readiness_sweep(ctx, &pkg_det_refs, registry);
@@ -190,7 +195,7 @@ fn cmd_up(
     }
 
     let report = tui::run(&plan, &rx, yes, start_engine)?;
-    finish(&report)?;
+    finish(&report);
 
     // Post-setup readiness sweep.
     run_readiness_sweep(ctx, &pkg_det_refs, registry);
@@ -199,7 +204,7 @@ fn cmd_up(
 
 // ── upone ready ─────────────────────────────────────────────────────────────
 
-fn cmd_ready(ctx: &Context, registry: &upone_core::Registry) -> anyhow::Result<()> {
+fn cmd_ready(ctx: &Context, registry: &upone_core::Registry) {
     let root = ctx.cwd.clone();
     let mut all_dirs = vec![root.clone()];
     all_dirs.extend(workspace::package_dirs(&root));
@@ -229,7 +234,7 @@ fn cmd_ready(ctx: &Context, registry: &upone_core::Registry) -> anyhow::Result<(
 
     if pkg_detections.is_empty() {
         report::no_project(ctx);
-        return Ok(());
+        return;
     }
 
     let pkg_det_refs: Vec<(&Context, &Detection)> =
@@ -240,7 +245,7 @@ fn cmd_ready(ctx: &Context, registry: &upone_core::Registry) -> anyhow::Result<(
         println!();
         println!("  no readiness checks applicable for detected technologies.");
         println!();
-        return Ok(());
+        return;
     }
 
     let readiness_report = upone_core::sweep(ctx, &checks);
@@ -249,7 +254,6 @@ fn cmd_ready(ctx: &Context, registry: &upone_core::Registry) -> anyhow::Result<(
     if !readiness_report.is_ready() {
         std::process::exit(1);
     }
-    Ok(())
 }
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
@@ -270,10 +274,9 @@ fn run_readiness_sweep(
 
 /// Prints the final summary and exits non-zero when any task failed, so
 /// scripts/CI can rely on the exit code.
-fn finish(report: &Report) -> anyhow::Result<()> {
+fn finish(report: &Report) {
     report::summary(report);
     if report.has_error() {
         std::process::exit(1);
     }
-    Ok(())
 }

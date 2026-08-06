@@ -25,11 +25,12 @@ pub enum Risk {
 }
 
 impl Risk {
-    pub fn label(&self) -> &'static str {
+    #[must_use]
+    pub const fn label(&self) -> &'static str {
         match self {
-            Risk::Low => "low",
-            Risk::Medium => "medium",
-            Risk::High => "high",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
         }
     }
 }

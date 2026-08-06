@@ -33,7 +33,7 @@ impl Provider for BetterAuth {
     fn plan(&self, _ctx: &Context, _planner: &mut Planner<'_>) {}
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
-        use upone_core::readiness::*;
+        use upone_core::readiness::{resolve_env_key, Importance, ReadinessCheck, ReadinessStatus};
 
         let cwd = ctx.cwd.clone();
         vec![ReadinessCheck::new(

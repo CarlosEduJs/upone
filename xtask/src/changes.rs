@@ -1,5 +1,7 @@
 //! Reading and writing `.changes/` notes.
 
+#![allow(clippy::print_stdout)]
+
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -19,9 +21,9 @@ impl FromStr for Bump {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_lowercase().as_str() {
-            "patch" => Ok(Bump::Patch),
-            "minor" => Ok(Bump::Minor),
-            "major" => Ok(Bump::Major),
+            "patch" => Ok(Self::Patch),
+            "minor" => Ok(Self::Minor),
+            "major" => Ok(Self::Major),
             other => Err(format!(
                 "invalid bump type: {other} (expected patch, minor or major)"
             )),
@@ -32,9 +34,9 @@ impl FromStr for Bump {
 impl fmt::Display for Bump {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Bump::Patch => f.write_str("patch"),
-            Bump::Minor => f.write_str("minor"),
-            Bump::Major => f.write_str("major"),
+            Self::Patch => f.write_str("patch"),
+            Self::Minor => f.write_str("minor"),
+            Self::Major => f.write_str("major"),
         }
     }
 }
@@ -169,8 +171,7 @@ pub fn new_note(root: &Path, alias: &str, bump: Bump, summary: &str) -> Result<(
     std::fs::create_dir_all(&dir)?;
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
     let slug = slugify(summary);
     let path = dir.join(format!("{package}-{ts}-{slug}.md"));
     let content = format!("---\ncrate: {package}\nbump: {bump}\n---\n\n{summary}\n");
@@ -186,7 +187,7 @@ fn slugify(s: &str) -> String {
         .map(|w| {
             w.chars()
                 .filter(|c| c.is_alphanumeric())
-                .flat_map(|c| c.to_lowercase())
+                .flat_map(char::to_lowercase)
                 .collect::<String>()
         })
         .filter(|w| !w.is_empty())

@@ -61,8 +61,7 @@ pub fn which(program: &str) -> bool {
     Command::new(program)
         .arg("--version")
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }
 
 /// Returns true if `needle` appears (case-insensitive) anywhere in the given files.
@@ -70,13 +69,10 @@ pub fn files_contain(cwd: &Path, files: &[&str], needles: &[&str]) -> bool {
     files.iter().any(|file| {
         let path = cwd.join(file);
         let ok = std::fs::read_to_string(&path);
-        match ok {
-            Ok(content) => {
-                let lower = content.to_lowercase();
-                needles.iter().any(|n| lower.contains(&n.to_lowercase()))
-            }
-            Err(_) => false,
-        }
+        ok.is_ok_and(|content| {
+            let lower = content.to_lowercase();
+            needles.iter().any(|n| lower.contains(&n.to_lowercase()))
+        })
     })
 }
 
@@ -141,7 +137,7 @@ pub fn package_has_dependency(cwd: &Path, dependency: &str) -> bool {
 /// Returns true when a `node_modules` directory exists at or above `cwd`.
 ///
 /// Workspace roots hoist dependencies, so a package may not hold its own
-/// node_modules (npm/pnpm/yarn hoist to the root, bun links them there too).
+/// `node_modules` (npm/pnpm/yarn hoist to the root, bun links them there too).
 /// Mirrors the upward-resolution behavior of [`js_install_task`].
 pub fn node_modules_present(cwd: &Path) -> bool {
     let mut dir = Some(cwd);
@@ -155,7 +151,7 @@ pub fn node_modules_present(cwd: &Path) -> bool {
 }
 
 /// Resolves the JS install task id detected in the project (if any).
-/// Used by providers that depend on node_modules (prisma, drizzle).
+/// Used by providers that depend on `node_modules` (prisma, drizzle).
 ///
 /// In a monorepo the lockfile usually lives at the workspace root while the
 /// package sits deeper, so this walks up from `cwd` to the filesystem root.
@@ -177,6 +173,7 @@ pub fn js_install_task(cwd: &Path) -> Option<&'static str> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use std::fs;

@@ -13,7 +13,7 @@ pub trait Provider: Send + Sync {
     /// Unique identifier (ex: "bun", "cargo").
     fn id(&self) -> &'static str;
 
-    /// File signatures that indicate the project (ex: ["bun.lock"]).
+    /// File signatures that indicate the project (ex: [`["bun.lock"]`]).
     fn signatures(&self) -> &'static [&'static str];
 
     /// Detects the project's presence.
@@ -35,7 +35,7 @@ pub trait Provider: Send + Sync {
         Detection {
             provider: self.id(),
             signature: signature.to_string(),
-            reason: format!("found {}", signature),
+            reason: format!("found {signature}"),
         }
     }
 
@@ -56,6 +56,7 @@ pub struct Registry {
 }
 
 impl Registry {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -65,6 +66,7 @@ impl Registry {
         self.providers.push(p);
     }
 
+    #[must_use]
     pub fn all(&self) -> &[Box<dyn Provider>] {
         &self.providers
     }
@@ -77,12 +79,14 @@ pub struct Detected {
 }
 
 impl Detected {
-    pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         self.found.is_empty()
     }
 }
 
 /// Runs all providers and collects detections.
+#[must_use]
 pub fn detect(cwd: &Path, registry: &Registry) -> Detected {
     let mut out = Detected::default();
     for provider in registry.all() {

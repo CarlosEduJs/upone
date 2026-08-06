@@ -28,6 +28,7 @@ use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
 use upone_core::{Context, Detection};
 
 /// Registers all bundled providers.
+#[must_use]
 pub fn build_registry() -> Registry {
     let mut reg = Registry::new();
     reg.register(Box::new(bun::Bun));
@@ -121,21 +122,21 @@ pub fn collect_readiness_checks(
             checks.push(ReadinessCheck::new(
                 id,
                 label,
-                format!("{} environment variable", key),
+                format!("{key} environment variable"),
                 importance,
                 move |_ctx| {
                     if upone_core::resolve_env_key(&cwd, &key).is_some() {
                         ReadinessStatus::Ready("found".into())
                     } else {
-                        let remedy = format!("Add {} to your .env.local or shell environment", key);
+                        let remedy = format!("Add {key} to your .env.local or shell environment");
                         if importance == Importance::Optional {
                             ReadinessStatus::Warning {
-                                reason: format!("{} not found (optional)", key),
+                                reason: format!("{key} not found (optional)"),
                                 remedy,
                             }
                         } else {
                             ReadinessStatus::NotReady {
-                                reason: format!("{} not found in process env or .env* files", key),
+                                reason: format!("{key} not found in process env or .env* files"),
                                 remedy,
                             }
                         }

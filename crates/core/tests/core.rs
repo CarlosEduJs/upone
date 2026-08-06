@@ -1,12 +1,12 @@
 //! Core tests: topological ordering, cycles and detection.
 
 #![allow(unused_crate_dependencies)]
+#![allow(clippy::unwrap_used)]
 
 use std::path::PathBuf;
 
 use upone_core::detect::{detect, Registry};
 use upone_core::plan::{Planner, RunOutcome, Task};
-use upone_core::run::RunError;
 use upone_core::{Context, Provider, Report, Risk};
 
 fn ctx() -> Context {
@@ -71,7 +71,10 @@ fn missing_dependency_errors() {
 fn run_emits_event_and_outcome() {
     let c = ctx();
     let mut p = Planner::new(&c);
-    p.add(Task::new("a", "a", "a").run(|c, e| run_ok(c, e)));
+    p.add(Task::new("a", "a", "a").run(|_c, emit| {
+        emit("ran");
+        Ok(RunOutcome::Ran("ok".into()))
+    }));
     let plan = p.build().unwrap();
 
     let plan = &plan;
@@ -79,11 +82,6 @@ fn run_emits_event_and_outcome() {
     let mut report = Report::new();
     engine.run(&mut report);
     assert!(!report.has_error());
-}
-
-fn run_ok(_c: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    emit("ran");
-    Ok(RunOutcome::Ran("ok".into()))
 }
 
 // ---- detection ----

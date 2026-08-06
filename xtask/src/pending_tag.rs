@@ -1,5 +1,7 @@
 //! `pending-release-tag` — print the version to release if one is pending.
 
+#![allow(clippy::print_stdout)]
+
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
@@ -14,10 +16,7 @@ pub fn run() -> Result<()> {
     let upone = packages.get("upone").context("upone package missing")?;
 
     let latest_tag = latest_release_tag(&root)?;
-    let pending = match latest_tag {
-        Some(tag) => upone.version > tag,
-        None => true,
-    };
+    let pending = latest_tag.is_none_or(|tag| upone.version > tag);
 
     if pending {
         println!("{}", upone.version);

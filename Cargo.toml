@@ -15,7 +15,7 @@ repository = "https://github.com/CarlosEduJs/upone"
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "allow"
-rust_2018_idioms = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
 unused_must_use = "deny"
 unused_crate_dependencies = "warn"
 trivial_casts = "warn"
@@ -27,7 +27,8 @@ unused_qualifications = "warn"
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
-cargo = "warn"
+cargo = { level = "warn", priority = -1 }
+multiple_crate_versions = "allow"
 
 unwrap_used = "warn"
 expect_used = "warn"

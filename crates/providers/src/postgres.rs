@@ -1,4 +1,4 @@
-//! PostgreSQL provider: detects postgres in docker-compose (or DATABASE_URL)
+//! `PostgreSQL` provider: detects postgres in docker-compose (or `DATABASE_URL`)
 //! and ensures the service is up.
 //!
 //! When a compose file defines the service, the `docker` provider's
@@ -83,20 +83,20 @@ impl Provider for Postgres {
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
-        use upone_core::readiness::*;
+        use upone_core::readiness::{resolve_env_key, Importance, ReadinessCheck, ReadinessStatus};
 
         let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 5432);
         let mut checks = vec![ReadinessCheck::new(
             "postgres-tcp",
-            format!("postgres (localhost:{})", port),
+            format!("postgres (localhost:{port})"),
             "PostgreSQL is accepting TCP connections",
             Importance::Required,
             move |_ctx| {
                 if postgres_reachable(port) {
-                    ReadinessStatus::Ready(format!("responding on localhost:{}", port))
+                    ReadinessStatus::Ready(format!("responding on localhost:{port}"))
                 } else {
                     ReadinessStatus::NotReady {
-                        reason: format!("postgres not responding on localhost:{}", port),
+                        reason: format!("postgres not responding on localhost:{port}"),
                         remedy: "Run 'docker compose up -d' or check if the postgres container is running".into(),
                     }
                 }
@@ -128,11 +128,10 @@ impl Provider for Postgres {
 
 fn postgres_reachable(port: u16) -> bool {
     use std::net::TcpStream;
-    TcpStream::connect_timeout(
-        &format!("127.0.0.1:{port}").parse().unwrap(),
-        Duration::from_millis(300),
-    )
-    .is_ok()
+    let Ok(addr) = format!("127.0.0.1:{port}").parse() else {
+        return false;
+    };
+    TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
 }
 
 /// Compose-backed: the `docker-up` task already started the service; just confirm it responds.
