@@ -68,14 +68,19 @@ struct UpdateBodyArgs {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::New(a) => run_new(a),
-        Cmd::Version(a) => version::run(a),
-        Cmd::UpdateReleaseBody(a) => release_body::run_update(a),
+        Cmd::New(a) => run_new(&a),
+        Cmd::Version(a) => version::run(&a),
+        Cmd::UpdateReleaseBody(a) => release_body::run_update(&a),
         Cmd::PendingReleaseTag => pending_tag::run(),
     }
 }
 
 /// Finds the workspace root (dir with Cargo.toml + .git).
+///
+/// # Errors
+///
+/// Returns an error when the current directory is not inside a workspace
+/// root, or when walking up the directory tree fails.
 pub fn workspace_root() -> Result<PathBuf> {
     let mut dir = std::env::current_dir()?;
     loop {
@@ -88,7 +93,7 @@ pub fn workspace_root() -> Result<PathBuf> {
     }
 }
 
-fn run_new(args: NewArgs) -> Result<()> {
+fn run_new(args: &NewArgs) -> Result<()> {
     let root = workspace_root()?;
     changes::new_note(&root, &args.crate_name, args.bump, &args.summary)
 }

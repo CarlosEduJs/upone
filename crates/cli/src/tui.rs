@@ -154,7 +154,7 @@ fn apply_event(state: &mut HashMap<String, TaskUi>, ev: CoreEvent) {
                 StepStatus::Error(_) => TaskUi::Failed,
                 _ => TaskUi::Pending,
             };
-            state.insert(step.task_id.clone(), ui);
+            state.insert(step.task_id, ui);
         }
         CoreEvent::StepStarting(id, _) => {
             state.insert(id, TaskUi::Running);
@@ -199,13 +199,13 @@ fn ui(f: &mut Frame<'_>, app: &App) {
         };
         let risk = task.risk.label();
         lines.push(Line::from(vec![
-            Span::styled(format!("{} {} ", icon, ARROW), Style::default().fg(color)),
+            Span::styled(format!("{icon} {ARROW} "), Style::default().fg(color)),
             Span::styled(
                 task.label.clone(),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!(" (risk: {})", risk),
+                format!(" (risk: {risk})"),
                 Style::default().fg(Color::DarkGray),
             ),
         ]));

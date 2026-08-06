@@ -56,7 +56,7 @@ impl Provider for Prisma {
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
-        use upone_core::readiness::*;
+        use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
 
         let cwd = ctx.cwd.clone();
         let (output_dir, display_rel) = resolve_prisma_output_dir(&cwd);
@@ -64,7 +64,7 @@ impl Provider for Prisma {
         vec![ReadinessCheck::new(
             "prisma-client",
             "prisma client generated",
-            format!("Prisma client exists in {}", display_rel),
+            format!("Prisma client exists in {display_rel}"),
             Importance::Required,
             move |_ctx| {
                 let has_marker = output_dir.join("index.js").is_file()
@@ -74,7 +74,7 @@ impl Provider for Prisma {
                     ReadinessStatus::Ready("prisma client present".into())
                 } else {
                     ReadinessStatus::NotReady {
-                        reason: format!("prisma client not found in {}", display_rel),
+                        reason: format!("prisma client not found in {display_rel}"),
                         remedy: "Run 'npx prisma generate' or 'upone up'".into(),
                     }
                 }
@@ -105,8 +105,7 @@ fn resolve_prisma_output_dir(cwd: &Path) -> (std::path::PathBuf, String) {
                         let resolved = schema_dir.join(raw_val);
                         let rel = resolved
                             .strip_prefix(cwd)
-                            .map(|p| p.display().to_string())
-                            .unwrap_or_else(|_| raw_val.to_string());
+                            .map_or_else(|_| raw_val.to_string(), |p| p.display().to_string());
                         return (resolved, rel);
                     }
                 }

@@ -77,20 +77,20 @@ impl Provider for Redis {
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
-        use upone_core::readiness::*;
+        use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
 
         let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 6379);
         vec![ReadinessCheck::new(
             "redis-tcp",
-            format!("redis (localhost:{})", port),
+            format!("redis (localhost:{port})"),
             "Redis is accepting TCP connections",
             Importance::Required,
             move |_ctx| {
                 if redis_reachable(port) {
-                    ReadinessStatus::Ready(format!("responding on localhost:{}", port))
+                    ReadinessStatus::Ready(format!("responding on localhost:{port}"))
                 } else {
                     ReadinessStatus::NotReady {
-                        reason: format!("redis not responding on localhost:{}", port),
+                        reason: format!("redis not responding on localhost:{port}"),
                         remedy: "Run 'docker compose up -d' or start redis manually".into(),
                     }
                 }
@@ -101,11 +101,10 @@ impl Provider for Redis {
 
 fn redis_reachable(port: u16) -> bool {
     use std::net::TcpStream;
-    TcpStream::connect_timeout(
-        &format!("127.0.0.1:{port}").parse().unwrap(),
-        Duration::from_millis(300),
-    )
-    .is_ok()
+    let Ok(addr) = format!("127.0.0.1:{port}").parse() else {
+        return false;
+    };
+    TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
 }
 
 /// Compose-backed: the `docker-up` task already started the service; just confirm it responds.

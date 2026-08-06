@@ -10,11 +10,11 @@ use crate::cmd::{spawn_cmd, which};
 pub struct JsPm {
     pub id: &'static str,
     pub label: &'static str,
-    /// Binary (ex: "npm", "pnpm", "bun").
+    /// Binary (ex: `"npm"`, `"pnpm"`, `"bun"`).
     pub bin: &'static str,
     /// Lockfile signatures that detect the project.
     pub signatures: &'static [&'static str],
-    /// Extra `install` args (ex: ["--frozen-lockfile"]).
+    /// Extra `install` args (ex: `["--frozen-lockfile"]`).
     pub install_args: &'static [&'static str],
 }
 

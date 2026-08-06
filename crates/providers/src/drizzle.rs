@@ -62,7 +62,7 @@ impl Provider for Drizzle {
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
-        use upone_core::readiness::*;
+        use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
 
         let cwd = ctx.cwd.clone();
         vec![ReadinessCheck::new(

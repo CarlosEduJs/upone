@@ -39,12 +39,14 @@ pub enum ReadinessStatus {
 }
 
 impl ReadinessStatus {
-    pub fn is_ready(&self) -> bool {
-        matches!(self, ReadinessStatus::Ready(_))
+    #[must_use]
+    pub const fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready(_))
     }
 
-    pub fn is_not_ready(&self) -> bool {
-        matches!(self, ReadinessStatus::NotReady { .. })
+    #[must_use]
+    pub const fn is_not_ready(&self) -> bool {
+        matches!(self, Self::NotReady { .. })
     }
 }
 
@@ -75,7 +77,7 @@ impl ReadinessCheck {
         importance: Importance,
         check_fn: impl Fn(&Context) -> ReadinessStatus + Send + Sync + 'static,
     ) -> Self {
-        ReadinessCheck {
+        Self {
             id: id.into(),
             label: label.into(),
             description: description.into(),
@@ -85,6 +87,7 @@ impl ReadinessCheck {
     }
 
     /// Evaluate this check.
+    #[must_use]
     pub fn run(&self, ctx: &Context) -> ReadinessStatus {
         (self.check_fn)(ctx)
     }
@@ -96,7 +99,7 @@ impl fmt::Debug for ReadinessCheck {
             .field("id", &self.id)
             .field("label", &self.label)
             .field("importance", &self.importance)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -118,16 +121,19 @@ pub struct ReadinessReport {
 }
 
 impl ReadinessReport {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Returns `true` when every required check passed.
+    #[must_use]
     pub fn is_ready(&self) -> bool {
         !self.results.iter().any(|r| r.status.is_not_ready())
     }
 
     /// All results that are warnings (optional failures).
+    #[must_use]
     pub fn warnings(&self) -> Vec<&ReadinessResult> {
         self.results
             .iter()
@@ -136,6 +142,7 @@ impl ReadinessReport {
     }
 
     /// All results that are failures (required).
+    #[must_use]
     pub fn failures(&self) -> Vec<&ReadinessResult> {
         self.results
             .iter()
@@ -147,6 +154,7 @@ impl ReadinessReport {
 // ── Sweep ───────────────────────────────────────────────────────────────────
 
 /// Runs all readiness checks and returns a report.
+#[must_use]
 pub fn sweep(ctx: &Context, checks: &[ReadinessCheck]) -> ReadinessReport {
     let mut report = ReadinessReport::new();
     for check in checks {
@@ -172,6 +180,7 @@ const DOTENV_FILES: &[&str] = &[".env.local", ".env.development", ".env"];
 /// 4. `.env`
 ///
 /// Returns the value if found in any layer, `None` otherwise.
+#[must_use]
 pub fn resolve_env_key(cwd: &Path, key: &str) -> Option<String> {
     if let Ok(val) = std::env::var(key) {
         if !val.is_empty() {
@@ -245,6 +254,7 @@ const TEMPLATE_FILES: &[&str] = &[".env.example", ".env.template"];
 /// A key is marked [`Importance::Optional`] when the preceding comment
 /// contains `optional` (case-insensitive). All other keys default to
 /// [`Importance::Required`].
+#[must_use]
 pub fn env_requirements_from_template(cwd: &Path) -> Vec<EnvRequirement> {
     for file in TEMPLATE_FILES {
         let path = cwd.join(file);
@@ -292,6 +302,7 @@ fn parse_env_template(content: &str) -> Vec<EnvRequirement> {
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -341,7 +352,7 @@ EMPTY=
 
     #[test]
     fn parse_template_required_and_optional() {
-        let content = r#"
+        let content = r"
 DATABASE_URL=postgres://localhost/mydb
 BETTER_AUTH_SECRET=change-me
 
@@ -351,7 +362,7 @@ ANALYTICS_KEY=
 
 # This is required
 NEXT_PUBLIC_API_URL=https://api.example.com
-"#;
+";
         let reqs = parse_env_template(content);
         assert_eq!(reqs.len(), 5);
 

@@ -25,14 +25,16 @@ pub fn preview(detections: &Detected, plan: &Plan) {
     for d in &detections.found {
         println!("  {} Detected {} ({})", CHECK, d.provider, d.signature);
     }
-    println!("  {} Plan created", CHECK);
+    println!("  {CHECK} Plan created");
     println!();
 
     // groups by level to show the execution order
     for (i, level) in plan.levels.iter().enumerate() {
         let label = if i == 0 { "next" } else { "later" };
         for id in level {
-            let task = plan.task(id).unwrap();
+            let Some(task) = plan.task(id) else {
+                continue;
+            };
             println!(
                 "     [{}] {} — {} (risk: {})",
                 label,
@@ -80,9 +82,9 @@ pub fn summary(report: &Report) {
     }
     println!();
     if failed == 0 {
-        println!("  ready: {} tasks executed, {} skipped.", ok, skipped);
+        println!("  ready: {ok} tasks executed, {skipped} skipped.");
     } else {
-        println!("  {} tasks failed. Review the messages above.", failed);
+        println!("  {failed} tasks failed. Review the messages above.");
     }
     println!();
 }
@@ -103,15 +105,15 @@ pub fn readiness(report: &upone_core::ReadinessReport) {
     for r in &report.results {
         match &r.status {
             ReadinessStatus::Ready(msg) => {
-                println!("  {} {} — {}", CHECK, r.label, msg);
+                println!("  {CHECK} {label} — {msg}", label = r.label);
             }
             ReadinessStatus::Warning { reason, remedy } => {
-                println!("  {} {} — {}", WARN, r.label, reason);
-                println!("    {} {}", WARN, remedy);
+                println!("  {WARN} {label} — {reason}", label = r.label);
+                println!("    {WARN} {remedy}");
             }
             ReadinessStatus::NotReady { reason, remedy } => {
-                println!("  {} {} — {}", CROSS, r.label, reason);
-                println!("    {} {}", CROSS, remedy);
+                println!("  {CROSS} {label} — {reason}", label = r.label);
+                println!("    {CROSS} {remedy}");
             }
         }
     }
@@ -126,17 +128,11 @@ pub fn readiness(report: &upone_core::ReadinessReport) {
     let failures = report.failures().len();
 
     if failures == 0 && warnings == 0 {
-        println!("  {} all {} checks passed.", CHECK, ready);
+        println!("  {CHECK} all {ready} checks passed.");
     } else if failures == 0 {
-        println!(
-            "  {} {} checks passed, {} warnings.",
-            CHECK, ready, warnings
-        );
+        println!("  {CHECK} {ready} checks passed, {warnings} warnings.");
     } else {
-        println!(
-            "  {} {} ready, {} warnings, {} not ready.",
-            CROSS, ready, warnings, failures
-        );
+        println!("  {CROSS} {ready} ready, {warnings} warnings, {failures} not ready.");
     }
     println!();
 }

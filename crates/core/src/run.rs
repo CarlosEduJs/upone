@@ -39,16 +39,19 @@ pub struct Report {
 }
 
 impl Report {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn has_error(&self) -> bool {
         self.steps
             .iter()
             .any(|s| matches!(s.status, StepStatus::Error(_)))
     }
 
+    #[must_use]
     pub fn errors(&self) -> Vec<&Step> {
         self.steps
             .iter()
@@ -111,14 +114,11 @@ impl<'a> Engine<'a> {
                     std::thread::spawn(move || {
                         let mut emitted: Vec<String> = Vec::new();
                         let mut emit = |line: &str| emitted.push(line.to_string());
-                        let run_ctx = match cwd {
-                            Some(dir) => Context { cwd: dir },
-                            None => ctx,
-                        };
-                        let outcome = match run {
-                            Some(run) => run(&run_ctx, &mut emit),
-                            None => Ok(RunOutcome::Ran("no action".to_string())),
-                        };
+                        let run_ctx = cwd.map_or(ctx, |dir| Context { cwd: dir });
+                        let outcome = run.map_or_else(
+                            || Ok(RunOutcome::Ran("no action".to_string())),
+                            |run| run(&run_ctx, &mut emit),
+                        );
                         (outcome, emitted)
                     }),
                 ));
@@ -126,8 +126,7 @@ impl<'a> Engine<'a> {
         }
 
         for (id, label, handle) in entries {
-            let raw = handle.join();
-            if raw.is_err() {
+            let Ok((outcome, emitted)) = handle.join() else {
                 let step = Step {
                     task_id: id,
                     label,
@@ -139,8 +138,7 @@ impl<'a> Engine<'a> {
                 report.steps.push(step.clone());
                 (self.on_event)(Event::StepDone(step));
                 continue;
-            }
-            let (outcome, emitted) = raw.unwrap();
+            };
             let detail = if emitted.is_empty() {
                 None
             } else {

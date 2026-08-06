@@ -50,7 +50,7 @@ impl Task {
         label: impl Into<String>,
         description: impl Into<String>,
     ) -> Self {
-        Task {
+        Self {
             id: id.into(),
             label: label.into(),
             description: description.into(),
@@ -61,22 +61,26 @@ impl Task {
         }
     }
 
-    pub fn risk(mut self, risk: Risk) -> Self {
+    #[must_use]
+    pub const fn risk(mut self, risk: Risk) -> Self {
         self.risk = risk;
         self
     }
 
     /// Sets the directory the task runs in. Defaults to the project root.
+    #[must_use]
     pub fn cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
         self.cwd = Some(cwd.into());
         self
     }
 
+    #[must_use]
     pub fn depends_on(mut self, deps: impl IntoIterator<Item = impl Into<TaskId>>) -> Self {
         self.deps = deps.into_iter().map(Into::into).collect();
         self
     }
 
+    #[must_use]
     pub fn run(
         mut self,
         run: impl Fn(&Context, &mut dyn FnMut(&str)) -> Result<RunOutcome, crate::run::RunError>
@@ -96,7 +100,8 @@ pub struct Planner<'a> {
 }
 
 impl<'a> Planner<'a> {
-    pub fn new(ctx: &'a Context) -> Self {
+    #[must_use]
+    pub const fn new(ctx: &'a Context) -> Self {
         Planner {
             ctx,
             tasks: Vec::new(),
@@ -117,6 +122,11 @@ impl<'a> Planner<'a> {
 
     /// Resolves the topological order: a list of "levels", where each
     /// level is a set of independent (parallelizable) tasks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the plan has duplicate task ids, references an
+    /// unknown dependency, or contains a dependency cycle.
     pub fn build(self) -> Result<Plan, String> {
         self.build_inner(false)
     }
@@ -125,6 +135,11 @@ impl<'a> Planner<'a> {
     /// outside this planner (e.g. a workspace package depending on the root
     /// `bun-install`). Such external deps are ignored for ordering here and
     /// validated when the plans are merged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the plan has duplicate task ids or contains a
+    /// dependency cycle.
     pub fn build_allow_external(self) -> Result<Plan, String> {
         self.build_inner(true)
     }
@@ -161,8 +176,7 @@ impl<'a> Planner<'a> {
                 for dep in &task.deps {
                     if !by_id.contains_key(dep) {
                         return Err(format!(
-                            "task '{}' depends on '{}' which does not exist",
-                            id, dep
+                            "task '{id}' depends on '{dep}' which does not exist"
                         ));
                     }
                 }
@@ -217,6 +231,7 @@ pub struct Plan {
 }
 
 impl Plan {
+    #[must_use]
     pub fn task(&self, id: &TaskId) -> Option<&Task> {
         self.tasks.get(id)
     }
@@ -225,6 +240,7 @@ impl Plan {
         self.tasks.values()
     }
 
+    #[must_use]
     pub fn ids(&self) -> Vec<String> {
         self.tasks.keys().cloned().collect()
     }

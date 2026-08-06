@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 /// Returns the workspace package directories below `root` (excluding root
 /// itself). Returns an empty vec when the project is not a workspace.
+#[must_use]
 pub fn package_dirs(root: &Path) -> Vec<PathBuf> {
     let canon_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut dirs = Vec::new();
@@ -25,6 +26,7 @@ pub fn package_dirs(root: &Path) -> Vec<PathBuf> {
 }
 
 /// Returns true when `root` declares any workspace layout.
+#[must_use]
 pub fn is_workspace(root: &Path) -> bool {
     !package_dirs(root).is_empty()
 }
@@ -33,7 +35,8 @@ pub fn is_workspace(root: &Path) -> bool {
 ///
 /// Components are joined with `_` and any `_` inside a component is doubled,
 /// so `packages/db` and a package literally named `packages_db` cannot share
-/// a namespace ("packages_db" vs "packages__db").
+/// a namespace (`packages_db` vs `packages__db`).
+#[must_use]
 pub fn dir_slug(rel: &Path) -> String {
     rel.components()
         .filter_map(|c| c.as_os_str().to_str())
@@ -62,10 +65,10 @@ fn collect_globs(root: &Path, canon_root: &Path, globs: &[String], out: &mut Vec
 
     if !excludes.is_empty() {
         out.retain(|dir| {
-            let rel = dir
-                .strip_prefix(root)
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| dir.display().to_string());
+            let rel = dir.strip_prefix(root).map_or_else(
+                |_| dir.display().to_string(),
+                |p| p.to_string_lossy().into_owned(),
+            );
             !excludes.iter().any(|pat| matches_glob(pat, &rel))
         });
     }
@@ -120,10 +123,7 @@ fn push_package(path: &Path, canon_root: &Path, out: &mut Vec<PathBuf>) {
 /// True when the canonical path of `path` is a descendant of `canon_root`
 /// (or equals it). Handles `..`, absolute components and symlinks.
 fn inside(path: &Path, canon_root: &Path) -> bool {
-    match std::fs::canonicalize(path) {
-        Ok(canon) => canon.starts_with(canon_root),
-        Err(_) => false,
-    }
+    std::fs::canonicalize(path).is_ok_and(|canon| canon.starts_with(canon_root))
 }
 
 /// Minimal glob matcher supporting `*` (any chars except `/`) and `**` (any
@@ -228,6 +228,7 @@ fn pnpm_workspaces(root: &Path) -> Option<Vec<String>> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use std::fs;

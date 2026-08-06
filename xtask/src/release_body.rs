@@ -1,6 +1,9 @@
 //! Rendering and publishing GitHub release bodies.
 
+#![allow(clippy::print_stdout)]
+
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -13,7 +16,7 @@ pub fn render(packages: &BTreeMap<String, Package>, _version: &str) -> Result<St
     let mut out = String::from("## What's changed\n\n");
     out.push_str("| Crate | Version |\n| --- | --- |\n");
     for p in cx::releasable(packages) {
-        out.push_str(&format!("| {} | {} |\n", p.name, p.version));
+        let _ = writeln!(out, "| {} | {} |", p.name, p.version);
     }
     out.push('\n');
     for p in cx::releasable(packages) {
@@ -21,16 +24,16 @@ pub fn render(packages: &BTreeMap<String, Package>, _version: &str) -> Result<St
         if bullets.is_empty() {
             continue;
         }
-        out.push_str(&format!("### {}\n\n", p.name));
+        let _ = write!(out, "### {}\n\n", p.name);
         for b in bullets {
-            out.push_str(&format!("- {b}\n"));
+            let _ = writeln!(out, "- {b}");
         }
         out.push('\n');
     }
     Ok(out)
 }
 
-pub fn run_update(args: crate::UpdateBodyArgs) -> Result<()> {
+pub fn run_update(args: &crate::UpdateBodyArgs) -> Result<()> {
     let root = workspace_root()?;
     let version = args.tag.trim_start_matches('v');
     let packages = cx::load_packages(&root)?;

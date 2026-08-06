@@ -1,6 +1,9 @@
 //! `version` — aggregate `.changes/` notes, bump versions and write changelogs.
 
+#![allow(clippy::print_stdout)]
+
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -12,7 +15,8 @@ use crate::{changelog, cx, release_body, workspace_root};
 /// Packages whose version can be bumped by this tool.
 const RELEASABLE: [&str; 3] = ["upone", "upone-core", "upone-providers"];
 
-pub fn run(args: crate::VersionArgs) -> Result<()> {
+#[allow(clippy::too_many_lines)]
+pub fn run(args: &crate::VersionArgs) -> Result<()> {
     let root = workspace_root()?;
     let mut packages = cx::load_packages(&root)?;
     // All releasable crates must exist before any indexing below.
@@ -60,7 +64,7 @@ pub fn run(args: crate::VersionArgs) -> Result<()> {
 
     // Compute new versions for bumped packages only.
     let mut new_versions: BTreeMap<String, Version> = BTreeMap::new();
-    for name in RELEASABLE.iter() {
+    for name in &RELEASABLE {
         if let Some(b) = bumps.get(*name) {
             let current = &packages[*name].version;
             let next = bumped(current, *b);
@@ -76,11 +80,11 @@ pub fn run(args: crate::VersionArgs) -> Result<()> {
 
     if args.dry_run {
         println!("would release v{release_version}");
-        for name in RELEASABLE.iter() {
-            let msg = match new_versions.get(*name) {
-                Some(next) => format!("  {name}: {} -> {next}", old_versions[*name]),
-                None => format!("  {name}: {} (unchanged)", old_versions[*name]),
-            };
+        for name in &RELEASABLE {
+            let msg = new_versions.get(*name).map_or_else(
+                || format!("  {name}: {} (unchanged)", old_versions[*name]),
+                |next| format!("  {name}: {} -> {next}", old_versions[*name]),
+            );
             println!("{msg}");
         }
         for (name, group) in &note_groups {
@@ -134,7 +138,7 @@ pub fn run(args: crate::VersionArgs) -> Result<()> {
             .extend(bumped_deps);
     }
 
-    for name in RELEASABLE.iter() {
+    for name in &RELEASABLE {
         if let Some(next) = new_versions.get(*name) {
             let bullets = bullets_by_crate.get(*name).cloned().unwrap_or_default();
             changelog::prepend_section(
@@ -150,18 +154,18 @@ pub fn run(args: crate::VersionArgs) -> Result<()> {
     let mut block = format!("## {release_version}\n\n");
     block.push_str("Crate versions in this release:\n\n");
     block.push_str("| Crate | Version |\n| --- | --- |\n");
-    for name in RELEASABLE.iter() {
-        block.push_str(&format!("| {name} | {} |\n", packages[*name].version));
+    for name in &RELEASABLE {
+        let _ = writeln!(block, "| {name} | {} |", packages[*name].version);
     }
     block.push('\n');
-    for name in RELEASABLE.iter() {
+    for name in &RELEASABLE {
         if let Some(bullets) = bullets_by_crate.get(*name) {
             if bullets.is_empty() {
                 continue;
             }
-            block.push_str(&format!("### {name}\n\n"));
+            let _ = write!(block, "### {name}\n\n");
             for b in bullets {
-                block.push_str(&format!("- {b}\n"));
+                let _ = writeln!(block, "- {b}");
             }
             block.push('\n');
         }
@@ -179,11 +183,11 @@ pub fn run(args: crate::VersionArgs) -> Result<()> {
     std::fs::write(rel_dir.join("body.md"), &body)?;
 
     println!("release v{release_version} prepared (see .release/body.md)");
-    for name in RELEASABLE.iter() {
-        let msg = match new_versions.get(*name) {
-            Some(next) => format!("  {name}: {} -> {next}", old_versions[*name]),
-            None => format!("  {name}: {} (unchanged)", old_versions[*name]),
-        };
+    for name in &RELEASABLE {
+        let msg = new_versions.get(*name).map_or_else(
+            || format!("  {name}: {} (unchanged)", old_versions[*name]),
+            |next| format!("  {name}: {} -> {next}", old_versions[*name]),
+        );
         println!("{msg}");
     }
     Ok(())
@@ -195,22 +199,22 @@ fn bumped(v: &Version, b: Bump) -> Version {
             major: v.major,
             minor: v.minor,
             patch: v.patch + 1,
-            pre: Default::default(),
-            build: Default::default(),
+            pre: semver::Prerelease::default(),
+            build: semver::BuildMetadata::default(),
         },
         Bump::Minor => Version {
             major: v.major,
             minor: v.minor + 1,
             patch: 0,
-            pre: Default::default(),
-            build: Default::default(),
+            pre: semver::Prerelease::default(),
+            build: semver::BuildMetadata::default(),
         },
         Bump::Major => Version {
             major: v.major + 1,
             minor: 0,
             patch: 0,
-            pre: Default::default(),
-            build: Default::default(),
+            pre: semver::Prerelease::default(),
+            build: semver::BuildMetadata::default(),
         },
     }
 }
@@ -222,7 +226,7 @@ fn set_crate_version(manifest: &Path, version: &Version) -> Result<()> {
     let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
     let mut in_package = false;
     let mut replaced = false;
-    for line in lines.iter_mut() {
+    for line in &mut lines {
         let t = line.trim();
         if t == "[package]" {
             in_package = true;

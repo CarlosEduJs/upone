@@ -1,5 +1,6 @@
 //! Reading and writing CHANGELOG.md files.
 
+use std::fmt::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -23,7 +24,7 @@ pub fn ensure(path: &Path) -> Result<()> {
 pub fn prepend_section(path: &Path, version: &str, bullets: &[String]) -> Result<()> {
     let mut block = format!("## {version}\n\n");
     for b in bullets {
-        block.push_str(&format!("- {b}\n"));
+        let _ = writeln!(block, "- {b}");
     }
     prepend_raw(path, version, &block)
 }

@@ -2,6 +2,7 @@
 //! postgres by content, redis by content).
 
 #![allow(unused_crate_dependencies)]
+#![allow(clippy::unwrap_used)]
 
 use upone_core::detect::detect;
 use upone_providers::build_registry;
