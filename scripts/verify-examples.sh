@@ -90,6 +90,7 @@ for dir in "$ROOT"/examples/*/; do
     orm-prisma)     check_dry_run "$dir" "check npm installed" "npm install" "prisma generate" ;;
     orm-drizzle)    check_dry_run "$dir" "check pnpm installed" "pnpm install" "drizzle-kit generate" "verify postgres is running" ;;
     monorepo-pnpm)  check_dry_run "$dir" "check pnpm installed" "pnpm install" ;;
+    monorepo-bun)   check_dry_run "$dir" "check bun installed" "bun install" "check drizzle-kit available" "drizzle-kit generate" "check postgres is running" ;;
     *) echo "WARN [$name]: unknown example, skipping"; echo ;;
   esac
 
@@ -97,6 +98,11 @@ for dir in "$ROOT"/examples/*/; do
     case "$name" in
       rust-hello|js-pnpm|js-npm|js-bun|orm-prisma|monorepo-pnpm)
         check_exec "$dir" ;;
+      monorepo-bun)
+        check_exec "$dir"
+        # Remove what `bun install` and `drizzle-kit generate` wrote so the
+        # fixture stays clean for the next run.
+        rm -rf "$dir/node_modules" "$dir/packages/db/node_modules" "$dir/packages/db/src/migrations" ;;
       stack-docker|orm-drizzle)
         if docker_reachable; then
           check_exec "$dir"

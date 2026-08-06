@@ -111,8 +111,21 @@ pub fn compose_host_port(cwd: &Path, files: &[&str], container_port: u16) -> u16
     container_port
 }
 
+/// Returns true if `dependency` appears in the package.json dependencies or
+/// devDependencies of `cwd`. Used for dependency-based detections (trpc,
+/// better-auth, next) that have no dedicated config file.
+pub fn package_has_dependency(cwd: &Path, dependency: &str) -> bool {
+    let Ok(text) = std::fs::read_to_string(cwd.join("package.json")) else {
+        return false;
+    };
+    text.contains(&format!("\"{dependency}\""))
+}
+
 /// Resolves the JS install task id detected in the project (if any).
 /// Used by providers that depend on node_modules (prisma, drizzle).
+///
+/// In a monorepo the lockfile usually lives at the workspace root while the
+/// package sits deeper, so this walks up from `cwd` to the filesystem root.
 pub fn js_install_task(cwd: &Path) -> Option<&'static str> {
     let markers: [(&str, &str); 4] = [
         ("bun.lock", "bun-install"),
@@ -120,8 +133,12 @@ pub fn js_install_task(cwd: &Path) -> Option<&'static str> {
         ("pnpm-lock.yaml", "pnpm-install"),
         ("package-lock.json", "npm-install"),
     ];
-    markers
-        .iter()
-        .find(|(f, _)| cwd.join(f).is_file())
-        .map(|(_, id)| *id)
+    let mut dir = Some(cwd);
+    while let Some(d) = dir {
+        if let Some((_, id)) = markers.iter().find(|(f, _)| d.join(f).is_file()) {
+            return Some(*id);
+        }
+        dir = d.parent();
+    }
+    None
 }

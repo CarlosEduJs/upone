@@ -35,7 +35,7 @@ impl Provider for Drizzle {
     }
 
     fn plan(&self, ctx: &Context, planner: &mut Planner<'_>) {
-        let check = Task::new(
+        let mut check = Task::new(
             "drizzle-check",
             "check drizzle-kit available",
             "checks dependencies and the drizzle CLI",
@@ -53,6 +53,7 @@ impl Provider for Drizzle {
         .run(drizzle_generate);
 
         if let Some(install) = crate::cmd::js_install_task(&ctx.cwd) {
+            check = check.depends_on([install]);
             gen = gen.depends_on(["drizzle-check", install]);
         }
 

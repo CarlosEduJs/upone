@@ -1,0 +1,11 @@
+{
+  "name": "upone-monorepo-bun",
+  "private": true,
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ]
+  },
+  "packageManager": "bun@1.3.14"
+}

@@ -2,6 +2,7 @@
 //! dependencies determine the order via topological sort.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::{Context, Risk};
@@ -36,6 +37,10 @@ pub struct Task {
     pub risk: Risk,
     /// Dependencies by id — determine execution order.
     pub deps: Vec<TaskId>,
+    /// Directory the task runs in. When `None`, the Planner stamps it with
+    /// the project context's cwd (so tasks know where to run, even in a
+    /// monorepo where a task may live in a package subfolder).
+    pub cwd: Option<PathBuf>,
     pub run: Option<RunFn>,
 }
 
@@ -51,12 +56,19 @@ impl Task {
             description: description.into(),
             risk: Risk::Low,
             deps: Vec::new(),
+            cwd: None,
             run: None,
         }
     }
 
     pub fn risk(mut self, risk: Risk) -> Self {
         self.risk = risk;
+        self
+    }
+
+    /// Sets the directory the task runs in. Defaults to the project root.
+    pub fn cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
+        self.cwd = Some(cwd.into());
         self
     }
 
@@ -92,18 +104,37 @@ impl<'a> Planner<'a> {
     }
 
     pub fn add(&mut self, task: Task) {
+        let task = if task.cwd.is_none() {
+            Task {
+                cwd: Some(self.ctx.cwd.clone()),
+                ..task
+            }
+        } else {
+            task
+        };
         self.tasks.push(task);
     }
 
     /// Resolves the topological order: a list of "levels", where each
     /// level is a set of independent (parallelizable) tasks.
     pub fn build(self) -> Result<Plan, String> {
+        self.build_inner(false)
+    }
+
+    /// Like [`Planner::build`] but tolerates dependencies on tasks that live
+    /// outside this planner (e.g. a workspace package depending on the root
+    /// `bun-install`). Such external deps are ignored for ordering here and
+    /// validated when the plans are merged.
+    pub fn build_allow_external(self) -> Result<Plan, String> {
+        self.build_inner(true)
+    }
+
+    fn build_inner(self, allow_external: bool) -> Result<Plan, String> {
         let mut dependents: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
         let mut indeg: HashMap<TaskId, usize> = HashMap::new();
         let mut by_id: HashMap<TaskId, Task> = HashMap::new();
 
         for task in self.tasks {
-            indeg.insert(task.id.clone(), task.deps.len());
             for dep in &task.deps {
                 dependents
                     .entry(dep.clone())
@@ -114,12 +145,23 @@ impl<'a> Planner<'a> {
         }
 
         for (id, task) in &by_id {
-            for dep in &task.deps {
-                if !by_id.contains_key(dep) {
-                    return Err(format!(
-                        "task '{}' depends on '{}' which does not exist",
-                        id, dep
-                    ));
+            let known_deps = task
+                .deps
+                .iter()
+                .filter(|d| by_id.contains_key(d.as_str()))
+                .count();
+            indeg.insert(id.clone(), known_deps);
+        }
+
+        if !allow_external {
+            for (id, task) in &by_id {
+                for dep in &task.deps {
+                    if !by_id.contains_key(dep) {
+                        return Err(format!(
+                            "task '{}' depends on '{}' which does not exist",
+                            id, dep
+                        ));
+                    }
                 }
             }
         }
