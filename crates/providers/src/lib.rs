@@ -1,5 +1,7 @@
 //! Bundled technology providers.
 
+use serde_json as _;
+
 pub mod better_auth;
 pub mod biome;
 pub mod bun;

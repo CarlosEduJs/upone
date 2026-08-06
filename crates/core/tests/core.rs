@@ -1,5 +1,7 @@
 //! Core tests: topological ordering, cycles and detection.
 
+#![allow(unused_crate_dependencies)]
+
 use std::path::PathBuf;
 
 use upone_core::detect::{detect, Registry};

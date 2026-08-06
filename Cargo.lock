@@ -685,7 +685,6 @@ dependencies = [
 name = "upone-core"
 version = "0.3.0"
 dependencies = [
- "anyhow",
  "thiserror",
 ]
 
@@ -693,7 +692,6 @@ dependencies = [
 name = "upone-providers"
 version = "0.3.0"
 dependencies = [
- "anyhow",
  "serde_json",
  "upone-core",
 ]

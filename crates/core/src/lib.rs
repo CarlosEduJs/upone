@@ -4,6 +4,8 @@
 
 use std::path::PathBuf;
 
+use thiserror as _;
+
 /// Context of the project being prepared.
 #[derive(Debug, Clone, Default)]
 pub struct Context {
