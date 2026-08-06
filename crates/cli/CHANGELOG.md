@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0
+
+- Recognize monorepos: detect at the workspace root and every package, run each task in the right package directory, and deduplicate repeated detections.
+- update upone-core 0.1.0 -> 0.2.0
+- update upone-providers 0.1.1 -> 0.2.0
 ## 0.1.1
 
 - Exit with a non-zero status when any task in the plan fails, so scripts and CI pipelines can detect a failed run.

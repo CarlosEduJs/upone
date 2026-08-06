@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0
+
+- Detect across bun/npm/pnpm workspaces: discover package directories and scan them for drizzle, postgres, prisma and the rest.
+- New detection-only providers: turbo, biome, shadcn, next, trpc and better-auth.
+- Drizzle and prisma check tasks now wait for the package-manager install, fixing a race that failed when node_modules was missing.
 ## 0.1.1
 
 - Ensure postgres and redis never start a second, redundant `docker compose` invocation: when a compose file defines them they depend on the docker provider's compose-up task and only verify the service responds, removing a race between concurrent compose runs.
