@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Exit with a non-zero status when any task in the plan fails, so scripts and CI pipelines can detect a failed run.
+- update upone-providers 0.1.0 -> 0.1.1
 ## 0.1.0
 
 - Introduced the interactive `up` command (clap) that prepares a project for development.
