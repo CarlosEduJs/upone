@@ -6,6 +6,9 @@ license = "MIT"
 repository = "https://github.com/CarlosEduJs/upone"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true

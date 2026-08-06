@@ -12,6 +12,32 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/CarlosEduJs/upone"
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "allow"
+rust_2018_idioms = "warn"
+unused_must_use = "deny"
+unused_crate_dependencies = "warn"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unused_import_braces = "warn"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = "warn"
+
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+dbg_macro = "warn"
+
 [workspace.dependencies]
 upone-core = { path = "crates/core" }
 upone-providers = { path = "crates/providers" }

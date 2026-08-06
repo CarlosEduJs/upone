@@ -5,6 +5,9 @@ edition = "2021"
 license = "MIT"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 thiserror.workspace = true
