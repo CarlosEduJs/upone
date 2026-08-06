@@ -75,6 +75,28 @@ impl Provider for Redis {
             );
         }
     }
+
+    fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
+        use upone_core::readiness::*;
+
+        let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 6379);
+        vec![ReadinessCheck::new(
+            "redis-tcp",
+            format!("redis (localhost:{})", port),
+            "Redis is accepting TCP connections",
+            Importance::Required,
+            move |_ctx| {
+                if redis_reachable(port) {
+                    ReadinessStatus::Ready(format!("responding on localhost:{}", port))
+                } else {
+                    ReadinessStatus::NotReady {
+                        reason: format!("redis not responding on localhost:{}", port),
+                        remedy: "Run 'docker compose up -d' or start redis manually".into(),
+                    }
+                }
+            },
+        )]
+    }
 }
 
 fn redis_reachable(port: u16) -> bool {

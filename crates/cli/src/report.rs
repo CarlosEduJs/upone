@@ -86,3 +86,53 @@ pub fn summary(report: &Report) {
     }
     println!();
 }
+
+const WARN: &str = "\u{26a0}";
+
+pub fn readiness(report: &upone_core::ReadinessReport) {
+    use upone_core::ReadinessStatus;
+
+    if report.results.is_empty() {
+        return;
+    }
+
+    println!();
+    println!("  environment readiness");
+    println!("  {}", "─".repeat(40));
+
+    for r in &report.results {
+        match &r.status {
+            ReadinessStatus::Ready(msg) => {
+                println!("  {} {} — {}", CHECK, r.label, msg);
+            }
+            ReadinessStatus::Warning { reason, remedy } => {
+                println!("  {} {} — {}", WARN, r.label, reason);
+                println!("    {} {}", WARN, remedy);
+            }
+            ReadinessStatus::NotReady { reason, remedy } => {
+                println!("  {} {} — {}", CROSS, r.label, reason);
+                println!("    {} {}", CROSS, remedy);
+            }
+        }
+    }
+
+    println!();
+    let ready = report.results.iter().filter(|r| r.status.is_ready()).count();
+    let warnings = report.warnings().len();
+    let failures = report.failures().len();
+
+    if failures == 0 && warnings == 0 {
+        println!("  {} all {} checks passed.", CHECK, ready);
+    } else if failures == 0 {
+        println!(
+            "  {} {} checks passed, {} warnings.",
+            CHECK, ready, warnings
+        );
+    } else {
+        println!(
+            "  {} {} ready, {} warnings, {} not ready.",
+            CROSS, ready, warnings, failures
+        );
+    }
+    println!();
+}

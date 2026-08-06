@@ -39,6 +39,46 @@ impl Provider for Cargo {
         planner.add(check);
         planner.add(build);
     }
+
+    fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
+        use upone_core::readiness::*;
+
+        let cwd = ctx.cwd.clone();
+        vec![
+            ReadinessCheck::new(
+                "cargo-toolchain",
+                "cargo on PATH",
+                "cargo CLI is available",
+                Importance::Required,
+                |_ctx| {
+                    if which("cargo") {
+                        ReadinessStatus::Ready("cargo found".into())
+                    } else {
+                        ReadinessStatus::NotReady {
+                            reason: "cargo not found on PATH".into(),
+                            remedy: "Install Rust via rustup: https://rustup.rs".into(),
+                        }
+                    }
+                },
+            ),
+            ReadinessCheck::new(
+                "cargo-lock",
+                "Cargo.lock present",
+                "Cargo.lock exists (dependencies resolved)",
+                Importance::Required,
+                move |_ctx| {
+                    if cwd.join("Cargo.lock").is_file() {
+                        ReadinessStatus::Ready("Cargo.lock found".into())
+                    } else {
+                        ReadinessStatus::NotReady {
+                            reason: "Cargo.lock not found".into(),
+                            remedy: "Run 'cargo build' or 'cargo generate-lockfile' to generate it".into(),
+                        }
+                    }
+                },
+            ),
+        ]
+    }
 }
 
 fn check_cargo(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {

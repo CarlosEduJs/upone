@@ -54,6 +54,29 @@ impl Provider for Prisma {
         planner.add(check);
         planner.add(gen);
     }
+
+    fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
+        use upone_core::readiness::*;
+
+        let cwd = ctx.cwd.clone();
+        vec![ReadinessCheck::new(
+            "prisma-client",
+            "prisma client generated",
+            "Prisma client exists in node_modules/.prisma/client",
+            Importance::Required,
+            move |_ctx| {
+                let marker = cwd.join("node_modules/.prisma/client/index.js");
+                if marker.is_file() {
+                    ReadinessStatus::Ready("prisma client present".into())
+                } else {
+                    ReadinessStatus::NotReady {
+                        reason: "prisma client not found in node_modules/.prisma/client".into(),
+                        remedy: "Run 'npx prisma generate' or 'upone up'".into(),
+                    }
+                }
+            },
+        )]
+    }
 }
 
 fn check_prisma(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {

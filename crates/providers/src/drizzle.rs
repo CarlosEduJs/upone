@@ -60,6 +60,28 @@ impl Provider for Drizzle {
         planner.add(check);
         planner.add(gen);
     }
+
+    fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
+        use upone_core::readiness::*;
+
+        let cwd = ctx.cwd.clone();
+        vec![ReadinessCheck::new(
+            "drizzle-deps",
+            "drizzle dependencies installed",
+            "node_modules present for drizzle-kit",
+            Importance::Required,
+            move |_ctx| {
+                if crate::cmd::node_modules_present(&cwd) {
+                    ReadinessStatus::Ready("node_modules present".into())
+                } else {
+                    ReadinessStatus::NotReady {
+                        reason: "node_modules missing for drizzle".into(),
+                        remedy: "Run your package manager's install or 'upone up'".into(),
+                    }
+                }
+            },
+        )]
+    }
 }
 
 fn check_drizzle(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {

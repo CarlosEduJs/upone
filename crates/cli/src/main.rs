@@ -10,7 +10,7 @@ use std::sync::{mpsc, Arc};
 
 use clap::Parser;
 use upone_core::{Context, Detected, Detection, Engine, Event, Report, Task};
-use upone_providers::{build_registry, workspace};
+use upone_providers::{build_registry, collect_readiness_checks, workspace};
 
 #[derive(Debug, clap::Parser)]
 #[command(name = "upone", version, about = "prepares development environments")]
@@ -31,19 +31,30 @@ enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// Checks whether the development environment is ready.
+    Ready,
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let cwd = std::env::current_dir()?;
-    let (dry_run, yes) = match cli.command {
-        Command::Up { dry_run, yes } => (dry_run, yes),
-    };
-
     let ctx = Context { cwd };
-
     let registry = build_registry();
 
+    match cli.command {
+        Command::Up { dry_run, yes } => cmd_up(&ctx, &registry, dry_run, yes),
+        Command::Ready => cmd_ready(&ctx, &registry),
+    }
+}
+
+// ── upone up ────────────────────────────────────────────────────────────────
+
+fn cmd_up(
+    ctx: &Context,
+    registry: &upone_core::Registry,
+    dry_run: bool,
+    yes: bool,
+) -> anyhow::Result<()> {
     // Monorepos: detect at the root and at every workspace package, so a
     // project where drizzle lives under `packages/db` is still recognized.
     let root = ctx.cwd.clone();
@@ -52,7 +63,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut detections = Detected::default();
     let mut seen: HashSet<(String, String, String)> = HashSet::new();
-    let mut planner = upone_core::Planner::new(&ctx);
+    let mut planner = upone_core::Planner::new(ctx);
     for dir in &all_dirs {
         let rel = dir
             .strip_prefix(&root)
@@ -64,7 +75,7 @@ fn main() -> anyhow::Result<()> {
 
         // Plan this directory's providers with its own cwd so tasks built
         // here know where to run (e.g. `drizzle-kit generate` in packages/db).
-        let dir_detections = upone_core::detect::detect(dir, &registry);
+        let dir_detections = upone_core::detect::detect(dir, registry);
         let mut sub_planner = upone_core::Planner::new(&dir_ctx);
         for d in &dir_detections.found {
             let provider = registry
@@ -139,7 +150,7 @@ fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("failed to build the plan: {e}"))?;
 
     if detections.is_empty() {
-        report::no_project(&ctx);
+        report::no_project(ctx);
         return Ok(());
     }
 
@@ -167,11 +178,77 @@ fn main() -> anyhow::Result<()> {
     // main thread and print the summary — useful for pipe/CI.
     if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
         let report = start_engine()?;
-        return finish(&report);
+        finish(&report)?;
+
+        // Post-setup readiness sweep.
+        run_readiness_sweep(ctx, &detections, registry);
+        return Ok(());
     }
 
     let report = tui::run(&plan, &rx, yes, start_engine)?;
-    finish(&report)
+    finish(&report)?;
+
+    // Post-setup readiness sweep.
+    run_readiness_sweep(ctx, &detections, registry);
+    Ok(())
+}
+
+// ── upone ready ─────────────────────────────────────────────────────────────
+
+fn cmd_ready(ctx: &Context, registry: &upone_core::Registry) -> anyhow::Result<()> {
+    let root = ctx.cwd.clone();
+    let mut all_dirs = vec![root.clone()];
+    all_dirs.extend(workspace::package_dirs(&root));
+
+    let mut all_detections: Vec<Detection> = Vec::new();
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+
+    for dir in &all_dirs {
+        let dir_detections = upone_core::detect::detect(dir, registry);
+        for d in dir_detections.found {
+            let key = (d.provider.to_string(), d.signature.clone());
+            if seen.insert(key) {
+                all_detections.push(d);
+            }
+        }
+    }
+
+    if all_detections.is_empty() {
+        report::no_project(ctx);
+        return Ok(());
+    }
+
+    let checks = collect_readiness_checks(ctx, &all_detections, registry);
+    if checks.is_empty() {
+        println!();
+        println!("  no readiness checks applicable for detected technologies.");
+        println!();
+        return Ok(());
+    }
+
+    let readiness_report = upone_core::sweep(ctx, &checks);
+    report::readiness(&readiness_report);
+
+    if !readiness_report.is_ready() {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+// ── Shared helpers ──────────────────────────────────────────────────────────
+
+/// Runs the readiness sweep and prints the report.
+fn run_readiness_sweep(
+    ctx: &Context,
+    detections: &Detected,
+    registry: &upone_core::Registry,
+) {
+    let checks = collect_readiness_checks(ctx, &detections.found, registry);
+    if checks.is_empty() {
+        return;
+    }
+    let readiness_report = upone_core::sweep(ctx, &checks);
+    report::readiness(&readiness_report);
 }
 
 /// Prints the final summary and exits non-zero when any task failed, so
