@@ -37,7 +37,7 @@ jobs:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          VERSION="$(cargo run -q -p xtask -- pending-release-tag)"
+          VERSION="$(cargo run -q --locked -p xtask -- pending-release-tag)"
           echo "version=${VERSION}"
           if [[ "$COMMIT_MSG" =~ ^chore:\ release\ v[0-9] ]] && [[ -n "$VERSION" ]]; then
             echo "release-pending=true" >> "$GITHUB_OUTPUT"

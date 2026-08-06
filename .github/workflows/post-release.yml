@@ -42,4 +42,4 @@ jobs:
       - name: Render and publish body
         env:
           GH_TOKEN: ${{ secrets.UPONE_RELEASE_PAT }}
-        run: cargo run -q -p xtask -- update-release-body "$TAG" --publish
+        run: cargo run -q --locked -p xtask -- update-release-body "$TAG" --publish

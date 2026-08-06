@@ -31,7 +31,7 @@ jobs:
       # Aggregates notes: bumps versions, writes changelogs, archives notes,
       # and (if anything changed) writes .release/version + .release/body.md.
       - name: Run version tooling
-        run: cargo run -q -p xtask -- version
+        run: cargo run -q --locked -p xtask -- version
 
       - name: Open release PR
         if: hashFiles('.release/version') != ''

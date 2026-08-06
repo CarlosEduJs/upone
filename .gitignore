@@ -8,7 +8,9 @@ node_modules
 
 # Rust
 target
-Cargo.lock
+
+# Fixture projects keep their own generated lockfiles out of the repo
+examples/**/Cargo.lock
 
 # Build outputs
 dist

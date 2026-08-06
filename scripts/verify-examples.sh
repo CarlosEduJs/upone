@@ -13,7 +13,7 @@ EXEC=0
 [[ "${1:-}" == "--exec" ]] && EXEC=1
 
 echo "== building upone =="
-cargo build -q --manifest-path "$ROOT/Cargo.toml"
+cargo build --locked -q --manifest-path "$ROOT/Cargo.toml"
 
 fail=0
 skipped=0
