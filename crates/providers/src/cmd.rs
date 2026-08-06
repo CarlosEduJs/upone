@@ -111,14 +111,47 @@ pub fn compose_host_port(cwd: &Path, files: &[&str], container_port: u16) -> u16
     container_port
 }
 
-/// Returns true if `dependency` appears in the package.json dependencies or
-/// devDependencies of `cwd`. Used for dependency-based detections (trpc,
-/// better-auth, next) that have no dedicated config file.
+/// Returns true if `dependency` is a key in the package.json dependencies,
+/// devDependencies, peerDependencies or optionalDependencies maps of `cwd`.
+/// Used for dependency-based detections (trpc, better-auth, next) that have no
+/// dedicated config file. Parses the manifest as JSON so unrelated keys (e.g.
+/// `scripts.next` or `overrides.next`) can never trigger a match.
 pub fn package_has_dependency(cwd: &Path, dependency: &str) -> bool {
     let Ok(text) = std::fs::read_to_string(cwd.join("package.json")) else {
         return false;
     };
-    text.contains(&format!("\"{dependency}\""))
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+    ]
+    .iter()
+    .any(|section| {
+        value
+            .get(*section)
+            .and_then(|map| map.as_object())
+            .is_some_and(|map| map.contains_key(dependency))
+    })
+}
+
+/// Returns true when a `node_modules` directory exists at or above `cwd`.
+///
+/// Workspace roots hoist dependencies, so a package may not hold its own
+/// node_modules (npm/pnpm/yarn hoist to the root, bun links them there too).
+/// Mirrors the upward-resolution behavior of [`js_install_task`].
+pub fn node_modules_present(cwd: &Path) -> bool {
+    let mut dir = Some(cwd);
+    while let Some(d) = dir {
+        if d.join("node_modules").is_dir() {
+            return true;
+        }
+        dir = d.parent();
+    }
+    false
 }
 
 /// Resolves the JS install task id detected in the project (if any).
@@ -141,4 +174,62 @@ pub fn js_install_task(cwd: &Path) -> Option<&'static str> {
         dir = d.parent();
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("upone-cmd-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn package_has_dependency_checks_dep_maps_only() {
+        let dir = temp_dir("dep");
+        fs::write(
+            dir.join("package.json"),
+            r#"{
+  "name": "pkg",
+  "scripts": { "next": "echo nope" },
+  "overrides": { "better-auth": "1.0.0" },
+  "dependencies": { "next": "15.0.0" },
+  "devDependencies": { "@trpc/server": "^11.0.0" },
+  "peerDependencies": { "zod": "4.0.0" },
+  "optionalDependencies": { "esbuild": "0.25.0" }
+}"#,
+        )
+        .unwrap();
+        assert!(package_has_dependency(&dir, "next"));
+        assert!(package_has_dependency(&dir, "@trpc/server"));
+        assert!(package_has_dependency(&dir, "zod"));
+        assert!(package_has_dependency(&dir, "esbuild"));
+        // Present only in scripts/overrides must not match.
+        assert!(!package_has_dependency(&dir, "better-auth"));
+        assert!(!package_has_dependency(&dir, "echo"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn package_has_dependency_missing_or_broken_manifest() {
+        let dir = temp_dir("bad");
+        assert!(!package_has_dependency(&dir, "next"));
+        fs::write(dir.join("package.json"), "{not json").unwrap();
+        assert!(!package_has_dependency(&dir, "next"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn node_modules_present_walks_up() {
+        let dir = temp_dir("nm").join("a").join("b");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(temp_dir("nm").join("node_modules")).unwrap();
+        assert!(node_modules_present(&dir));
+        let _ = fs::remove_dir_all(temp_dir("nm"));
+    }
 }

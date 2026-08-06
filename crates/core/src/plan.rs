@@ -135,6 +135,9 @@ impl<'a> Planner<'a> {
         let mut by_id: HashMap<TaskId, Task> = HashMap::new();
 
         for task in self.tasks {
+            if by_id.contains_key(&task.id) {
+                return Err(format!("duplicate task id '{}' in the plan", task.id));
+            }
             for dep in &task.deps {
                 dependents
                     .entry(dep.clone())

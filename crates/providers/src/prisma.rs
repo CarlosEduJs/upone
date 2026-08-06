@@ -57,7 +57,7 @@ impl Provider for Prisma {
 }
 
 fn check_prisma(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    if !ctx.cwd.join("node_modules").is_dir() {
+    if !crate::cmd::node_modules_present(&ctx.cwd) {
         return Err(RunError::Failed(
             "node_modules missing. Install the project dependencies first (e.g. `upone up` installs them, or run your package manager's install).".into(),
         ));

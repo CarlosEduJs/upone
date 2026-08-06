@@ -51,14 +51,15 @@ fn main() -> anyhow::Result<()> {
     all_dirs.extend(workspace::package_dirs(&root));
 
     let mut detections = Detected::default();
-    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut seen: HashSet<(String, String, String)> = HashSet::new();
     let mut planner = upone_core::Planner::new(&ctx);
     for dir in &all_dirs {
-        let slug = dir
+        let rel = dir
             .strip_prefix(&root)
             .ok()
-            .filter(|rel| !rel.as_os_str().is_empty())
-            .map(dir_slug);
+            .filter(|rel| !rel.as_os_str().is_empty());
+        let slug = rel.map(dir_slug);
+        let rel_display = rel.map(|r| r.display().to_string());
         let dir_ctx = Context { cwd: dir.clone() };
 
         // Plan this directory's providers with its own cwd so tasks built
@@ -81,13 +82,20 @@ fn main() -> anyhow::Result<()> {
 
         // Surface detections with their package location in the reason.
         for d in &dir_detections.found {
-            if seen.contains(&(d.provider.to_string(), d.signature.clone())) {
+            // Distinct packages may report the same provider+signature (e.g.
+            // two packages with drizzle); keep them separate. Within one
+            // package a provider matches at most once, so no further dedup.
+            let key = (
+                rel_display.clone().unwrap_or_default(),
+                d.provider.to_string(),
+                d.signature.clone(),
+            );
+            if !seen.insert(key) {
                 continue;
             }
-            seen.insert((d.provider.to_string(), d.signature.clone()));
             let d = d.clone();
-            let reason = match &slug {
-                Some(s) => format!("{} ({})", d.reason, s.replace('_', "/")),
+            let reason = match &rel_display {
+                Some(r) => format!("{} ({})", d.reason, r),
                 None => d.reason,
             };
             detections.found.push(Detection {
@@ -176,11 +184,15 @@ fn finish(report: &upone_core::Report) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Turns a relative package path into a stable task-id namespace
-/// ("packages/db" -> "packages_db").
+/// Turns a relative package path into an injective task-id namespace.
+///
+/// Components are joined with `_` and any `_` inside a component is doubled,
+/// so `packages/db` and a package literally named `packages_db` cannot share
+/// a namespace ("packages_db" vs "packages__db").
 fn dir_slug(rel: &Path) -> String {
     rel.components()
         .filter_map(|c| c.as_os_str().to_str())
+        .map(|comp| comp.replace('_', "__"))
         .collect::<Vec<_>>()
         .join("_")
 }
