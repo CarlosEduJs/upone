@@ -1,0 +1,6 @@
+{
+    "name": "acme/php-hello",
+    "description": "upone example: php + composer",
+    "type": "project",
+    "require": {}
+}

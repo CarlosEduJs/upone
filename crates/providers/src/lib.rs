@@ -9,17 +9,25 @@ pub mod cargo;
 mod cmd;
 pub mod docker;
 pub mod drizzle;
+pub mod go;
 mod js;
 pub mod next;
 pub mod npm;
+pub mod php;
+pub mod pip;
 pub mod pnpm;
+pub mod poetry;
 pub mod postgres;
 pub mod prisma;
+pub mod python;
 pub mod redis;
+pub mod ruby;
 pub mod shadcn;
 pub mod trpc;
 pub mod turbo;
+pub mod uv;
 pub mod workspace;
+pub mod yarn;
 
 use std::collections::HashSet;
 
@@ -46,6 +54,13 @@ pub fn build_registry() -> Registry {
     reg.register(Box::new(next::Next));
     reg.register(Box::new(trpc::Trpc));
     reg.register(Box::new(better_auth::BetterAuth));
+    reg.register(Box::new(go::Go));
+    reg.register(Box::new(uv::Uv));
+    reg.register(Box::new(poetry::Poetry));
+    reg.register(Box::new(pip::Pip));
+    reg.register(Box::new(yarn::Yarn));
+    reg.register(Box::new(ruby::Ruby));
+    reg.register(Box::new(php::Php));
     reg
 }
 

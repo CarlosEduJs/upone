@@ -1,0 +1,3 @@
+# Runtime dependencies for the pip example.
+# Kept empty so `pip install -r requirements.txt` validates the venv flow
+# without needing network access.

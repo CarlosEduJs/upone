@@ -94,6 +94,43 @@ jobs:
         if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
         run: npm install -g pnpm
 
+      - name: Install yarn
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+        run: npm install -g yarn@1.22.22
+
+      - name: Install Go
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Install Python
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install poetry
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+        run: pip install poetry
+
+      - name: Install Ruby
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: false
+
+      - name: Install PHP + Composer
+        if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer
+
       - uses: dtolnay/rust-toolchain@stable
         if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
 
