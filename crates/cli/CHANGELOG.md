@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.0
+
+- update upone-providers 0.3.0 -> 0.4.0
 ## 0.3.0
 
 - Add `upone ready` subcommand for non-invasive environment readiness verification and integrate post-setup readiness sweep into `upone up`.
