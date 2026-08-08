@@ -122,6 +122,7 @@ jobs:
         if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
         uses: ruby/setup-ruby@v1
         with:
+          ruby-version: '3.3'
           bundler-cache: false
 
       - name: Install PHP + Composer
