@@ -82,10 +82,17 @@ for dir in "$ROOT"/examples/*/; do
   [[ "$name" == _* ]] && continue # skip shared helpers
 
   case "$name" in
-    rust-hello)     check_dry_run "$dir" "check cargo installed" "cargo build" ;;
+rust-hello)     check_dry_run "$dir" "check cargo installed" "cargo build" ;;
+    go-hello)       check_dry_run "$dir" "check go installed" "go mod tidy" "go build ./..." ;;
     js-pnpm)        check_dry_run "$dir" "check pnpm installed" "pnpm install" ;;
     js-npm)         check_dry_run "$dir" "check npm installed" "npm install" ;;
     js-bun)         check_dry_run "$dir" "check bun installed" "bun install" ;;
+    js-yarn)        check_dry_run "$dir" "check yarn installed" "yarn install" ;;
+    py-uv)          check_dry_run "$dir" "check uv installed" "uv sync" ;;
+    py-poetry)      check_dry_run "$dir" "check poetry installed" "poetry install" ;;
+    py-pip)         check_dry_run "$dir" "check python installed" "create project venv" "pip install" ;;
+    ruby-hello)     check_dry_run "$dir" "check ruby/bundler installed" "bundle install" ;;
+    php-hello)      check_dry_run "$dir" "check php/composer installed" "composer install" ;;
     stack-docker)   check_dry_run "$dir" "check docker installed" "docker compose up" "verify postgres is running" "verify redis is running" ;;
     orm-prisma)     check_dry_run "$dir" "check npm installed" "npm install" "prisma generate" ;;
     orm-drizzle)    check_dry_run "$dir" "check pnpm installed" "pnpm install" "drizzle-kit generate" "verify postgres is running" ;;
@@ -96,13 +103,25 @@ for dir in "$ROOT"/examples/*/; do
 
   if [[ $EXEC -eq 1 ]]; then
     case "$name" in
-      rust-hello|js-pnpm|js-npm|js-bun|orm-prisma|monorepo-pnpm)
-        check_exec "$dir" ;;
-      monorepo-bun)
+      rust-hello|js-pnpm|js-npm|js-bun|js-yarn|orm-prisma|monorepo-pnpm|monorepo-bun|go-hello|py-uv|py-poetry|py-pip|ruby-hello|php-hello)
         check_exec "$dir"
-        # Remove what `bun install` and `drizzle-kit generate` wrote so the
-        # fixture stays clean for the next run.
-        rm -rf "$dir/node_modules" "$dir/packages/db/node_modules" "$dir/packages/db/src/migrations" ;;
+        case "$name" in
+          monorepo-bun)
+            # Remove what `bun install` and `drizzle-kit generate` wrote so the
+            # fixture stays clean for the next run.
+            rm -rf "$dir/node_modules" "$dir/packages/db/node_modules" "$dir/packages/db/src/migrations" ;;
+          py-uv|py-pip|py-poetry)
+            # Remove the venv each provider may have created so the fixture
+            # stays clean for the next run.
+            rm -rf "$dir/.venv" ;;
+          js-yarn)
+            rm -rf "$dir/node_modules" "$dir/.yarn" ;;
+          ruby-hello)
+            rm -f "$dir/Gemfile.lock" ;;
+          php-hello)
+            rm -rf "$dir/vendor" && rm -f "$dir/composer.lock" ;;
+        esac
+        ;;
       stack-docker|orm-drizzle)
         if docker_reachable; then
           check_exec "$dir"

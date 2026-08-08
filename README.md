@@ -27,6 +27,13 @@ You stay in control: a preview shows the plan and its risk level before anything
 | Technology | Detection signature | What it does |
 | --- | --- | --- |
 | **cargo** | `Cargo.toml` | Checks cargo is installed and runs `cargo build` |
+| **go** | `go.mod` | Runs `go mod tidy` and `go build ./...` |
+| **uv** | `uv.lock` | Installs dependencies with `uv sync` |
+| **poetry** | `poetry.lock` | Installs dependencies with `poetry install` |
+| **pip** | `requirements.txt` / `requirements*.txt` / `requirements/` | Creates a project `.venv` and runs `pip install` inside it |
+| **yarn** | `yarn.lock` | Installs dependencies with `yarn install` (`--immutable` on yarn berry, `--frozen-lockfile` on classic) |
+| **ruby** | `Gemfile` / `Gemfile.lock` | Installs gems with `bundle install` |
+| **php** | `composer.json` / `composer.lock` | Installs dependencies with `composer install` |
 | **npm** | `package-lock.json` | Installs dependencies with `npm install --no-audit --no-fund` |
 | **pnpm** | `pnpm-lock.yaml` | Installs dependencies with `pnpm install --frozen-lockfile` |
 | **bun** | `bun.lock` / `bun.lockb` | Installs dependencies with `bun install` |
@@ -41,6 +48,10 @@ You stay in control: a preview shows the plan and its risk level before anything
 | **Next.js** | `next.config.*` / `next` dep | Recognizes the app (informational) |
 | **tRPC** | `@trpc/server` dep | Recognizes the API (informational) |
 | **Better Auth** | `better-auth` dep | Checks `BETTER_AUTH_SECRET` is set |
+
+Python projects are disambiguated by lockfile: `uv.lock` → uv, otherwise
+`poetry.lock` → poetry, otherwise a requirements manifest → pip. When several
+are present, only the highest-precedence manager is detected.
 
 Beyond these, upone infers required environment keys from `.env.example` /
 `.env.template` files: keys listed as `# optional` become warnings, everything

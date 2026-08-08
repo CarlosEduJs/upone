@@ -1,0 +1,9 @@
+[project]
+name = "py-uv"
+version = "0.1.0"
+description = "upone example: python + uv"
+requires-python = ">=3.9"
+dependencies = []
+
+[tool.uv]
+package = false

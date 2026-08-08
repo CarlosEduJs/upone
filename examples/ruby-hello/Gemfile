@@ -1,0 +1,4 @@
+source "https://rubygems.org"
+
+# upone example: no runtime gems so `bundle install` validates the flow
+# without needing network access.

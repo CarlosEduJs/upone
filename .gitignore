@@ -1,6 +1,7 @@
 # Dependencies
 node_modules
 .pnp
+.venv
 
 # Release tooling output
 .release
