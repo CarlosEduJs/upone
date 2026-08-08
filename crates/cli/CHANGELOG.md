@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.5.0
+
+- update upone-providers 0.4.0 -> 0.5.0
 ## 0.4.0
 
 - update upone-providers 0.3.0 -> 0.4.0

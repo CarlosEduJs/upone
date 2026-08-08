@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0
+
+Crate versions in this release:
+
+| Crate | Version |
+| --- | --- |
+| upone | 0.5.0 |
+| upone-core | 0.3.0 |
+| upone-providers | 0.5.0 |
+
+### upone
+
+- update upone-providers 0.4.0 -> 0.5.0
+
+### upone-providers
+
+- Added the `mysql` provider (detects `mysql`/`mariadb` in docker-compose or a `mysql://`/`mariadb://` `DATABASE_URL`, ensures the service responds on `localhost:3306`).
+- Added the `mongo` provider (detects `mongo`/`mongodb` in docker-compose or a `mongodb://` URI via `MONGODB_URI`/`MONGO_URI`/`DATABASE_URL`, ensures the service responds on `localhost:27017`).
+- Added the `sqlite` provider (detects a `sqlite://` `DATABASE_URL` or an ORM config targeting sqlite; creates the database file if missing — there is no server to start).
+- Added the `mongoose` provider (recognizes the MongoDB ODM via the `mongoose` dependency; informational).
 ## 0.4.0
 
 Crate versions in this release:
