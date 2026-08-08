@@ -41,8 +41,8 @@ You stay in control: a preview shows the plan and its risk level before anything
 | **PostgreSQL** | `docker-compose` `postgres` / `DATABASE_URL` | Makes sure postgres is responding on `localhost:5432`, starting it if needed |
 | **Redis** | `docker-compose` `redis` / `redis.conf` | Makes sure redis is responding on `localhost:6379`, starting it if needed |
 | **MySQL/MariaDB** | `docker-compose` `mysql`/`mariadb` / `DATABASE_URL` | Makes sure mysql is responding on `localhost:3306`, starting it if needed |
-| **MongoDB** | `docker-compose` `mongo` / `MONGODB_URI` | Makes sure mongodb is responding on `localhost:27017`, starting it if needed |
-| **SQLite** | `DATABASE_URL=sqlite` / ORM config (Prisma, Drizzle, Alembic) | Ensures the SQLite database file exists (no server to start) |
+| **MongoDB** | `docker-compose` `mongo` / `MONGODB_URI` | Makes sure mongodb is responding on `localhost:27017`, starting it if needed; an externally configured URI (`mongodb+srv://`, remote hosts) is only verified against its own target |
+| **SQLite** | `DATABASE_URL=sqlite` / ORM config (Prisma, Drizzle, Alembic) | Creates the SQLite database file resolved from the env or the ORM config if it does not exist (no server to start) |
 | **Prisma** | `prisma/schema.prisma` | Generates the Prisma client with `npx prisma generate` |
 | **Drizzle** | `drizzle.config.*` | Generates migrations with `npx drizzle-kit generate` |
 | **Turborepo** | `turbo.json` | Recognizes the workspace (informational) |

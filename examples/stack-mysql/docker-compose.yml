@@ -9,8 +9,7 @@ services:
       MYSQL_USER: upone
       MYSQL_PASSWORD: upone
     ports:
-      - "3306:3306"
-    command: ["--default-authentication-plugin=mysql_native_password"]
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:

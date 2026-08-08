@@ -4,7 +4,9 @@
 //! Unlike postgres/redis/mysql/mongo there is no server to start: sqlite is an
 //! embedded engine. The only "prepare" a sqlite project needs is a database
 //! file that exists and is writable, so upone creates an empty one when the
-//! resolved `DATABASE_URL` points at a missing path (safe and idempotent).
+//! resolved `DATABASE_URL` — or the detected Prisma/Drizzle/Alembic config —
+//! points at a missing path (safe and idempotent). When no file path can be
+//! resolved at all, the provider detects the project but adds no task.
 
 use std::path::{Path, PathBuf};
 
@@ -68,12 +70,17 @@ impl Provider for Sqlite {
         None
     }
 
-    fn plan(&self, _ctx: &Context, planner: &mut Planner<'_>) {
+    fn plan(&self, ctx: &Context, planner: &mut Planner<'_>) {
+        // Nothing to ensure when the file path cannot be resolved from the
+        // environment or the detected ORM config.
+        if sqlite_path(&ctx.cwd).is_none() {
+            return;
+        }
         planner.add(
             Task::new(
                 "sqlite-ensure",
                 "ensure sqlite database file",
-                "creates the sqlite database file from DATABASE_URL if it does not exist (safe to repeat)",
+                "creates the sqlite database file from DATABASE_URL or the detected ORM config if it does not exist (safe to repeat)",
             )
             .risk(Risk::Low)
             .run(sqlite_ensure),
@@ -85,9 +92,10 @@ impl Provider for Sqlite {
         vec![ReadinessCheck::new(
             "sqlite-file",
             "sqlite database file",
-            "the sqlite database file from DATABASE_URL exists",
+            "the sqlite database file resolved from DATABASE_URL or the ORM config exists",
             Importance::Required,
-            move |_ctx| match sqlite_path(&cwd) {
+            move |_ctx| {
+                match sqlite_path(&cwd) {
                 Some(path) if path.is_file() => {
                     ReadinessStatus::Ready(format!("present at {}", path.display()))
                 }
@@ -96,34 +104,51 @@ impl Provider for Sqlite {
                     remedy: "Run 'upone up' to create it, or create the file yourself".into(),
                 },
                 None => ReadinessStatus::NotReady {
-                    reason: "DATABASE_URL (sqlite://) not found in process env or .env* files"
-                        .into(),
-                    remedy: "Add a sqlite DATABASE_URL to your .env.local or shell environment"
-                        .into(),
+                    reason: "could not resolve a sqlite database file from DATABASE_URL or the detected ORM config".into(),
+                    remedy: "Set a sqlite DATABASE_URL (or point the ORM config at a file) in your .env.local or shell environment".into(),
                 },
+            }
             },
         )]
     }
 }
 
-/// Resolves the sqlite database file path declared in `DATABASE_URL`.
+/// Resolves the sqlite database file path: first from the `DATABASE_URL`
+/// environment key, then from the detected Prisma/Drizzle/Alembic config.
+fn sqlite_path(cwd: &Path) -> Option<PathBuf> {
+    if let Some(url) = resolve_env_key(cwd, "DATABASE_URL") {
+        if let Some(path) = sqlite_path_from_url(cwd, &url) {
+            return Some(path);
+        }
+    }
+    sqlite_urls_from_configs(cwd)
+        .iter()
+        .find_map(|url| sqlite_path_from_url(cwd, url))
+}
+
+/// Resolves a sqlite database file path from a connection URL.
 ///
 /// Supports the URL forms sqlite clients accept, with an optional query string
 /// (`?mode=ro`, `?_pragma=...`) that is stripped:
 ///
-/// - `sqlite:///abs/path` → absolute (extra leading `/` marks the URL path)
-/// - `sqlite:////abs/path` → absolute
-/// - `sqlite://./rel.db` / `sqlite://rel.db` → relative to the project
-/// - `sqlite:path`, `file:path` → passed through as-is
-fn sqlite_path(cwd: &Path) -> Option<PathBuf> {
-    let url = resolve_env_key(cwd, "DATABASE_URL")?;
+/// - `sqlite:///abs/path` → absolute (`/abs/path`)
+/// - `sqlite:///./rel.db` / `sqlite:///../rel.db` → relative to the project
+/// - `sqlite://rel.db` / `sqlite:rel.db` → relative to the project
+/// - `file:path` → passed through as-is
+fn sqlite_path_from_url(cwd: &Path, url: &str) -> Option<PathBuf> {
     let url = match url.split_once('?') {
-        Some((path, _)) => path.to_string(),
+        Some((path, _)) => path,
         None => url,
     };
     let rest = if let Some(r) = url.strip_prefix("sqlite://") {
-        // The first `/` after the scheme is a URL separator; `//abs` is absolute.
-        r.strip_prefix('/').unwrap_or(r)
+        // A leading `/` marks an absolute filesystem path (`sqlite:///tmp/x.db`),
+        // except for the `/./`/`/../` forms, which stay project-relative
+        // (`sqlite:///./dev.db`).
+        if r.starts_with("/./") || r.starts_with("/../") {
+            &r[1..]
+        } else {
+            r
+        }
     } else if let Some(r) = url.strip_prefix("sqlite:") {
         r
     } else {
@@ -137,13 +162,103 @@ fn sqlite_path(cwd: &Path) -> Option<PathBuf> {
     Some(normalize_path(&cwd.join(rest)))
 }
 
-/// Returns a copy of `path` with `.` components removed (e.g. `/a/./b` → `/a/b`).
+/// Collects sqlite connection URLs declared in the detected ORM configs:
+/// Prisma (`url = "sqlite:..."` in the datasource), Alembic
+/// (`sqlalchemy.url = sqlite:///...`) and Drizzle (`url: "sqlite:..."`).
+fn sqlite_urls_from_configs(cwd: &Path) -> Vec<String> {
+    let mut urls = Vec::new();
+
+    if let Ok(content) = std::fs::read_to_string(cwd.join("prisma").join("schema.prisma")) {
+        for line in content.lines() {
+            if line.trim().starts_with("url") {
+                if let Some(val) = extract_quoted(line) {
+                    if is_sqlite_url(val) {
+                        urls.push(val.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    if let Ok(content) = std::fs::read_to_string(cwd.join("alembic.ini")) {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.to_lowercase().starts_with("sqlalchemy.url") {
+                let val = trimmed.split_once('=').map_or("", |(_, v)| v.trim());
+                if is_sqlite_url(val) {
+                    urls.push(val.to_string());
+                }
+            }
+        }
+    }
+
+    for cfg in DRIZZLE_CONFIGS {
+        if let Ok(content) = std::fs::read_to_string(cwd.join(cfg)) {
+            for val in find_quoted_sqlite_urls(&content) {
+                urls.push(val);
+            }
+        }
+    }
+
+    urls
+}
+
+/// Extracts the quoted value of an `key = "value"` line.
+fn extract_quoted(line: &str) -> Option<&str> {
+    let after = line.split_once('=')?.1.trim();
+    after
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .or_else(|| after.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+}
+
+/// True when `value` looks like a sqlite connection URL.
+fn is_sqlite_url(value: &str) -> bool {
+    value.starts_with("sqlite://") || value.starts_with("sqlite:") || value.starts_with("file:")
+}
+
+/// Finds quoted strings that are sqlite connection URLs in a config file
+/// (used for Drizzle configs, which are TS/JS and not reliably parseable).
+fn find_quoted_sqlite_urls(content: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    for quote in ['"', '\''] {
+        let mut rest = content;
+        while let Some(start) = rest.find(quote) {
+            rest = &rest[start + 1..];
+            let Some(end) = rest.find(quote) else {
+                break;
+            };
+            let candidate = rest[..end].trim();
+            if is_sqlite_url(candidate) {
+                urls.push(candidate.to_string());
+            }
+            rest = &rest[end + 1..];
+        }
+    }
+    urls
+}
+
+/// Returns a copy of `path` with `.` components removed and `..` components
+/// resolved lexically (e.g. `/a/./b/../c` → `/a/c`).
 fn normalize_path(path: &Path) -> PathBuf {
     use std::path::Component;
     let mut out = PathBuf::new();
     for c in path.components() {
-        if !matches!(c, Component::CurDir) {
-            out.push(c.as_os_str());
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                // Pop the last normal component if the parent dir refers to
+                // one; otherwise keep the `..` (e.g. when it would go above a
+                // relative prefix or the filesystem root).
+                let pop = out
+                    .components()
+                    .next_back()
+                    .is_some_and(|lc| matches!(lc, Component::Normal(_)));
+                if pop {
+                    out.pop();
+                }
+            }
+            other => out.push(other.as_os_str()),
         }
     }
     out
@@ -221,12 +336,31 @@ mod tests {
 
     #[test]
     fn resolves_absolute_path() {
+        // `sqlite:///abs` keeps its leading slash and resolves absolute...
         let dir = temp_dir("abs");
+        with_env(&dir, "sqlite:///tmp/upone-abs-test.db");
+        assert_eq!(
+            sqlite_path(&dir),
+            Some(PathBuf::from("/tmp/upone-abs-test.db"))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // ...as does the four-slash form.
+        let dir = temp_dir("abs4");
         with_env(&dir, "sqlite:////tmp/upone-abs-test.db");
         assert_eq!(
             sqlite_path(&dir),
             Some(PathBuf::from("/tmp/upone-abs-test.db"))
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolves_parent_relative() {
+        let dir = temp_dir("rel-dotdot");
+        with_env(&dir, "sqlite:///../upone-abs-test.db");
+        let expected = dir.parent().unwrap().join("upone-abs-test.db");
+        assert_eq!(sqlite_path(&dir), Some(expected));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -258,6 +392,56 @@ mod tests {
         // Second run skips.
         let outcome = sqlite_ensure(&Context { cwd: dir.clone() }, &mut emit).unwrap();
         assert!(matches!(outcome, RunOutcome::Skipped(_)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolves_from_prisma_config() {
+        let dir = temp_dir("prisma-cfg");
+        std::fs::create_dir_all(dir.join("prisma")).unwrap();
+        std::fs::write(
+            dir.join("prisma").join("schema.prisma"),
+            "datasource db {\n  provider = \"sqlite\"\n  url = \"sqlite:data/app.db\"\n}\n",
+        )
+        .unwrap();
+        assert_eq!(sqlite_path(&dir), Some(dir.join("data/app.db")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolves_from_drizzle_config() {
+        let dir = temp_dir("drizzle-cfg");
+        std::fs::write(
+            dir.join("drizzle.config.ts"),
+            "export default { dbCredentials: { url: \"sqlite:data/app.db\" } }",
+        )
+        .unwrap();
+        assert_eq!(sqlite_path(&dir), Some(dir.join("data/app.db")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolves_from_alembic_config() {
+        let dir = temp_dir("alembic-cfg");
+        std::fs::write(
+            dir.join("alembic.ini"),
+            "sqlalchemy.url = sqlite:///./server/dev.db\n",
+        )
+        .unwrap();
+        assert_eq!(sqlite_path(&dir), Some(dir.join("server/dev.db")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn non_sqlite_config_urls_are_ignored() {
+        let dir = temp_dir("cfg-other");
+        std::fs::create_dir_all(dir.join("prisma")).unwrap();
+        std::fs::write(
+            dir.join("prisma").join("schema.prisma"),
+            "datasource db {\n  provider = \"postgresql\"\n  url = \"postgres://localhost/app\"\n}\n",
+        )
+        .unwrap();
+        assert_eq!(sqlite_path(&dir), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

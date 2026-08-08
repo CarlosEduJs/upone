@@ -238,6 +238,33 @@ fn detects_mongo_by_compose_and_uri() {
 }
 
 #[test]
+fn does_not_detect_mongo_when_value_merely_contains_mongodb() {
+    // A value that only *contains* the word "mongodb" — or uses another
+    // scheme — must not count as a mongodb connection string.
+    let dir = in_dir(
+        "mongo-contains",
+        &[(".env", "DATABASE_URL=postgres://host/mongodb_replica_set")],
+    );
+    assert!(!ids(&dir).contains(&"mongo".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir(
+        "mongo-http-scheme",
+        &[(".env.local", "MONGO_URI=http://mongodb.example.com/app")],
+    );
+    assert!(!ids(&dir).contains(&"mongo".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // A comment mentioning mongodb must not match.
+    let dir = in_dir(
+        "mongo-comment",
+        &[(".env", "# MONGODB_URI=mongodb://localhost/app")],
+    );
+    assert!(!ids(&dir).contains(&"mongo".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn does_not_detect_mongo_without_signature() {
     let dir = in_dir(
         "nomongo",
