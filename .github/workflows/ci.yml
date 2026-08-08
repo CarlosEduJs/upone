@@ -94,9 +94,9 @@ jobs:
         if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
         run: npm install -g pnpm
 
-      - name: Install yarn
+      - name: Install yarn (corepack)
         if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
-        run: npm install -g yarn@1.22.22
+        run: npm install -g corepack && corepack enable
 
       - name: Install Go
         if: ${{ github.event_name == 'push' || steps.filter.outputs.relevant == 'true' }}
