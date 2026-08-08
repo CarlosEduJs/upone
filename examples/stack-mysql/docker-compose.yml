@@ -1,0 +1,22 @@
+name: stack-mysql
+
+services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: upone
+      MYSQL_DATABASE: upone
+      MYSQL_USER: upone
+      MYSQL_PASSWORD: upone
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uupone", "-pupone"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mysql-data:
