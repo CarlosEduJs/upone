@@ -94,6 +94,10 @@ rust-hello)     check_dry_run "$dir" "check cargo installed" "cargo build" ;;
     ruby-hello)     check_dry_run "$dir" "check ruby/bundler installed" "bundle install" ;;
     php-hello)      check_dry_run "$dir" "check php/composer installed" "composer install" ;;
     stack-docker)   check_dry_run "$dir" "check docker installed" "docker compose up" "verify postgres is running" "verify redis is running" ;;
+    stack-mysql)    check_dry_run "$dir" "check docker installed" "docker compose up" "verify mysql is running" ;;
+    stack-mongo)    check_dry_run "$dir" "check docker installed" "docker compose up" "verify mongodb is running" ;;
+    sqlite-hello)   check_dry_run "$dir" "ensure sqlite database file" ;;
+    mongoose)       check_dry_run "$dir" "check docker installed" "docker compose up" "check npm installed" "npm install" "verify mongodb is running" ;;
     orm-prisma)     check_dry_run "$dir" "check npm installed" "npm install" "prisma generate" ;;
     orm-drizzle)    check_dry_run "$dir" "check pnpm installed" "pnpm install" "drizzle-kit generate" "verify postgres is running" ;;
     monorepo-pnpm)  check_dry_run "$dir" "check pnpm installed" "pnpm install" ;;
@@ -103,13 +107,16 @@ rust-hello)     check_dry_run "$dir" "check cargo installed" "cargo build" ;;
 
   if [[ $EXEC -eq 1 ]]; then
     case "$name" in
-      rust-hello|js-pnpm|js-npm|js-bun|js-yarn|orm-prisma|monorepo-pnpm|monorepo-bun|go-hello|py-uv|py-poetry|py-pip|ruby-hello|php-hello)
+      rust-hello|js-pnpm|js-npm|js-bun|js-yarn|orm-prisma|monorepo-pnpm|monorepo-bun|go-hello|py-uv|py-poetry|py-pip|ruby-hello|php-hello|sqlite-hello)
         check_exec "$dir"
         case "$name" in
           monorepo-bun)
             # Remove what `bun install` and `drizzle-kit generate` wrote so the
             # fixture stays clean for the next run.
             rm -rf "$dir/node_modules" "$dir/packages/db/node_modules" "$dir/packages/db/src/migrations" ;;
+          sqlite-hello)
+            # Remove the database file sqlite-ensure created.
+            rm -f "$dir/app.db" ;;
           py-uv|py-pip|py-poetry)
             # Remove the venv each provider may have created so the fixture
             # stays clean for the next run.
@@ -122,9 +129,14 @@ rust-hello)     check_dry_run "$dir" "check cargo installed" "cargo build" ;;
             rm -rf "$dir/vendor" && rm -f "$dir/composer.lock" ;;
         esac
         ;;
-      stack-docker|orm-drizzle)
+      stack-docker|stack-mysql|stack-mongo|orm-drizzle|mongoose)
         if docker_reachable; then
           check_exec "$dir"
+          case "$name" in
+            mongoose)
+              # Remove what `npm install` wrote so the fixture stays clean.
+              rm -rf "$dir/node_modules" ;;
+          esac
           # Tear the example down so a later docker example can bind the same
           # host ports without colliding (both fixtures publish localhost:5432).
           (cd "$dir" && docker compose down -v >/dev/null 2>&1) || true

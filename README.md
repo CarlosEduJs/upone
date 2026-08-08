@@ -40,6 +40,9 @@ You stay in control: a preview shows the plan and its risk level before anything
 | **docker** | `docker-compose.yml` / `compose.yml` | Brings up the defined services with `docker compose up -d` |
 | **PostgreSQL** | `docker-compose` `postgres` / `DATABASE_URL` | Makes sure postgres is responding on `localhost:5432`, starting it if needed |
 | **Redis** | `docker-compose` `redis` / `redis.conf` | Makes sure redis is responding on `localhost:6379`, starting it if needed |
+| **MySQL/MariaDB** | `docker-compose` `mysql`/`mariadb` / `DATABASE_URL` | Makes sure mysql is responding on `localhost:3306`, starting it if needed |
+| **MongoDB** | `docker-compose` `mongo` / `MONGODB_URI` | Makes sure mongodb is responding on `localhost:27017`, starting it if needed |
+| **SQLite** | `DATABASE_URL=sqlite` / ORM config (Prisma, Drizzle, Alembic) | Ensures the SQLite database file exists (no server to start) |
 | **Prisma** | `prisma/schema.prisma` | Generates the Prisma client with `npx prisma generate` |
 | **Drizzle** | `drizzle.config.*` | Generates migrations with `npx drizzle-kit generate` |
 | **Turborepo** | `turbo.json` | Recognizes the workspace (informational) |
@@ -48,6 +51,7 @@ You stay in control: a preview shows the plan and its risk level before anything
 | **Next.js** | `next.config.*` / `next` dep | Recognizes the app (informational) |
 | **tRPC** | `@trpc/server` dep | Recognizes the API (informational) |
 | **Better Auth** | `better-auth` dep | Checks `BETTER_AUTH_SECRET` is set |
+| **Mongoose** | `mongoose` dep | Recognizes the MongoDB ODM (informational) |
 
 Python projects are disambiguated by lockfile: `uv.lock` → uv, otherwise
 `poetry.lock` → poetry, otherwise a requirements manifest → pip. When several

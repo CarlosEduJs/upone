@@ -163,6 +163,154 @@ fn prisma_custom_output_readiness_check() {
 }
 
 #[test]
+fn detects_mysql_by_compose_and_env() {
+    let dir = in_dir(
+        "mysql",
+        &[(
+            "docker-compose.yml",
+            "services:\n  mysql:\n    image: mysql:8\n",
+        )],
+    );
+    assert!(ids(&dir).contains(&"mysql".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // MariaDB is handled by the same provider.
+    let dir = in_dir(
+        "mariadb",
+        &[(
+            "docker-compose.yml",
+            "services:\n  db:\n    image: mariadb:11\n",
+        )],
+    );
+    assert!(ids(&dir).contains(&"mysql".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir(
+        "mysqlurl",
+        &[(".env", "DATABASE_URL=mysql://user:pass@localhost:3306/db")],
+    );
+    assert!(ids(&dir).contains(&"mysql".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn does_not_detect_mysql_without_signature() {
+    let dir = in_dir(
+        "nomysql",
+        &[(
+            "docker-compose.yml",
+            "services:\n  web:\n    image: nginx\n",
+        )],
+    );
+    assert!(!ids(&dir).contains(&"mysql".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_mongo_by_compose_and_uri() {
+    let dir = in_dir(
+        "mongo",
+        &[(
+            "docker-compose.yml",
+            "services:\n  mongo:\n    image: mongo:7\n",
+        )],
+    );
+    assert!(ids(&dir).contains(&"mongo".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir(
+        "mongouri",
+        &[(".env", "MONGODB_URI=mongodb://localhost:27017/app")],
+    );
+    assert!(ids(&dir).contains(&"mongo".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // mongodb+srv:// (Atlas) URIs also count.
+    let dir = in_dir(
+        "mongo-srv",
+        &[(
+            ".env.local",
+            "MONGO_URI=mongodb+srv://cluster.example.com/app",
+        )],
+    );
+    assert!(ids(&dir).contains(&"mongo".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn does_not_detect_mongo_without_signature() {
+    let dir = in_dir(
+        "nomongo",
+        &[(
+            "docker-compose.yml",
+            "services:\n  web:\n    image: nginx\n",
+        )],
+    );
+    assert!(!ids(&dir).contains(&"mongo".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_sqlite_by_env_and_orm_config() {
+    let dir = in_dir("sqlite", &[(".env", "DATABASE_URL=sqlite:///tmp/app.db")]);
+    assert!(ids(&dir).contains(&"sqlite".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // .env.development is committable (not gitignored) and read by upone.
+    let dir = in_dir(
+        "sqlite-dev-env",
+        &[(".env.development", "DATABASE_URL=sqlite:///./dev.db")],
+    );
+    assert!(ids(&dir).contains(&"sqlite".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir(
+        "sqlite-prisma",
+        &[(
+            "prisma/schema.prisma",
+            "datasource db { provider = \"sqlite\" }\n",
+        )],
+    );
+    assert!(ids(&dir).contains(&"sqlite".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir(
+        "sqlite-drizzle",
+        &[(
+            "drizzle.config.ts",
+            "export default { dialect: \"sqlite\" }",
+        )],
+    );
+    assert!(ids(&dir).contains(&"sqlite".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir(
+        "sqlite-alembic",
+        &[("alembic.ini", "sqlalchemy.url = sqlite:///./app.db")],
+    );
+    assert!(ids(&dir).contains(&"sqlite".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_mongoose_by_dependency() {
+    let dir = in_dir(
+        "mongoose",
+        &[("package.json", r#"{"dependencies":{"mongoose":"^8.0.0"}}"#)],
+    );
+    assert!(ids(&dir).contains(&"mongoose".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Present only in scripts must not match.
+    let dir = in_dir(
+        "no-mongoose",
+        &[("package.json", r#"{"scripts":{"mongoose":"echo nope"}}"#)],
+    );
+    assert!(!ids(&dir).contains(&"mongoose".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn detects_go() {
     let dir = in_dir("go", &[("go.mod", "module example.com/hello\n\ngo 1.24\n")]);
     assert!(ids(&dir).contains(&"go".to_string()));
