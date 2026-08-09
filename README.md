@@ -24,6 +24,13 @@ You stay in control: a preview shows the plan and its risk level before anything
 
 ## What it supports today
 
+Providers are grouped by category. A project can use several of them at once —
+upone detects them all, orders their tasks, and runs something like
+`pnpm install` → `prisma generate` back-to-back, without you having to remember
+the sequence.
+
+### Dependencies
+
 | Technology | Detection signature | What it does |
 | --- | --- | --- |
 | **cargo** | `Cargo.toml` | Checks cargo is installed and runs `cargo build` |
@@ -37,12 +44,26 @@ You stay in control: a preview shows the plan and its risk level before anything
 | **npm** | `package-lock.json` | Installs dependencies with `npm install --no-audit --no-fund` |
 | **pnpm** | `pnpm-lock.yaml` | Installs dependencies with `pnpm install --frozen-lockfile` |
 | **bun** | `bun.lock` / `bun.lockb` | Installs dependencies with `bun install` |
+
+Python projects are disambiguated by lockfile: `uv.lock` → uv, otherwise
+`poetry.lock` → poetry, otherwise a requirements manifest → pip. When several
+are present, only the highest-precedence manager is detected.
+
+### Databases and services
+
+| Technology | Detection signature | What it does |
+| --- | --- | --- |
 | **docker** | `docker-compose.yml` / `compose.yml` | Brings up the defined services with `docker compose up -d` |
 | **PostgreSQL** | `docker-compose` `postgres` / `DATABASE_URL` | Makes sure postgres is responding on `localhost:5432`, starting it if needed |
 | **Redis** | `docker-compose` `redis` / `redis.conf` | Makes sure redis is responding on `localhost:6379`, starting it if needed |
 | **MySQL/MariaDB** | `docker-compose` `mysql`/`mariadb` / `DATABASE_URL` | Makes sure mysql is responding on `localhost:3306`, starting it if needed |
 | **MongoDB** | `docker-compose` `mongo` / `MONGODB_URI` | Makes sure mongodb is responding on `localhost:27017`, starting it if needed; an externally configured URI (`mongodb+srv://`, remote hosts) is only verified against its own target |
 | **SQLite** | `DATABASE_URL=sqlite` / ORM config (Prisma, Drizzle, Alembic) | Creates the SQLite database file resolved from the env or the ORM config if it does not exist (no server to start) |
+
+### ORMs and migrations
+
+| Technology | Detection signature | What it does |
+| --- | --- | --- |
 | **Prisma** | `prisma/schema.prisma` | Generates the Prisma client with `npx prisma generate` |
 | **Drizzle** | `drizzle.config.*` | Generates migrations with `npx drizzle-kit generate` |
 | **TypeORM** | `typeorm` dep / `data-source.*` / `ormconfig.*` | Migrates the configured database with `npx typeorm migration:run` |
@@ -52,26 +73,23 @@ You stay in control: a preview shows the plan and its risk level before anything
 | **Alembic** | `alembic.ini` | Applies migrations with `python -m alembic upgrade head` inside the project venv |
 | **GORM** | `gorm.io/gorm` dep in `go.mod` | Recognizes the ORM (informational) |
 | **SQLAlchemy** | `sqlalchemy` dep in a Python manifest | Recognizes the ORM (informational; migrations are Alembic's job) |
+| **Mongoose** | `mongoose` dep | Recognizes the MongoDB ODM (informational) |
+
+### Frameworks and tooling
+
+| Technology | Detection signature | What it does |
+| --- | --- | --- |
 | **Turborepo** | `turbo.json` | Recognizes the workspace (informational) |
 | **Biome** | `biome.json` / `biome.jsonc` | Recognizes the project (informational) |
 | **shadcn/ui** | `components.json` | Recognizes the project (informational) |
 | **Next.js** | `next.config.*` / `next` dep | Recognizes the app (informational) |
 | **tRPC** | `@trpc/server` dep | Recognizes the API (informational) |
 | **Better Auth** | `better-auth` dep | Checks `BETTER_AUTH_SECRET` is set |
-| **Mongoose** | `mongoose` dep | Recognizes the MongoDB ODM (informational) |
-
-Python projects are disambiguated by lockfile: `uv.lock` → uv, otherwise
-`poetry.lock` → poetry, otherwise a requirements manifest → pip. When several
-are present, only the highest-precedence manager is detected.
 
 Beyond these, upone infers required environment keys from `.env.example` /
 `.env.template` files: keys listed as `# optional` become warnings, everything
 else is required. Between the provider checks and the `.env` template keys, the
 readiness report covers what your stack actually needs to run.
-
-A project can use several providers at once — upone detects them all, orders their
-tasks, and runs something like `pnpm install` → `prisma generate` back-to-back,
-without you having to remember the sequence.
 
 ## What it improves
 
