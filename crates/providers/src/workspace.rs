@@ -90,7 +90,16 @@ fn expand_glob(root: &Path, canon_root: &Path, glob: &str, out: &mut Vec<PathBuf
 /// directory itself included, skipping anything that escapes `canon_root`.
 /// Only directories that are real packages (have a package.json) are pushed.
 fn walk_dirs(base: &Path, out: &mut Vec<PathBuf>, canon_root: &Path) {
-    if !base.is_dir() || !inside(base, canon_root) {
+    walk_dirs_inner(base, out, canon_root, 0);
+}
+
+/// Bounds recursion so a symlink loop pointing back inside the root (e.g.
+/// `packages/loop -> .`) cannot recurse forever. `inside()` only rejects
+/// escapes *outward*, so a cycle inside the root needs an explicit depth cap.
+const MAX_DEPTH: usize = 32;
+
+fn walk_dirs_inner(base: &Path, out: &mut Vec<PathBuf>, canon_root: &Path, depth: usize) {
+    if depth > MAX_DEPTH || !base.is_dir() || !inside(base, canon_root) {
         return;
     }
     if base != canon_root {
@@ -100,7 +109,7 @@ fn walk_dirs(base: &Path, out: &mut Vec<PathBuf>, canon_root: &Path) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                walk_dirs(&path, out, canon_root);
+                walk_dirs_inner(&path, out, canon_root, depth + 1);
             }
         }
     }
@@ -296,5 +305,32 @@ mod tests {
         collect_globs(&root, &canon_root, &["packages".into()], &mut out);
         assert_eq!(out.len(), 1);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn walk_dirs_terminates_on_symlink_loop() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_dir("loop");
+        fs::create_dir_all(root.join("packages")).unwrap();
+        fs::write(root.join("package.json"), "{}").unwrap();
+        fs::write(root.join("packages").join("package.json"), "{}").unwrap();
+        // A cycle inside the root: `packages/back` resolves to the root,
+        // which `inside()` accepts because it does not escape outward.
+        symlink(&root, root.join("packages").join("back")).unwrap();
+
+        let canon_root = fs::canonicalize(&root).unwrap();
+        let mut out = Vec::new();
+        walk_dirs(&root, &mut out, &canon_root);
+        let _ = fs::remove_dir_all(&root);
+
+        // Must not recurse forever; only reachable dirs are reported.
+        let rels: Vec<String> = out
+            .iter()
+            .map(|p| p.strip_prefix(&canon_root).unwrap().display().to_string())
+            .collect();
+        assert!(rels.contains(&String::from("packages")));
+        assert_eq!(rels.len(), out.len());
     }
 }

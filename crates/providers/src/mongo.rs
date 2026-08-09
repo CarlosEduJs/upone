@@ -127,8 +127,26 @@ impl Provider for Mongo {
                         reason: format!("mongodb target {host}:{port} not responding"),
                         remedy: "Check the mongodb service for the configured URI".into(),
                     },
-                    None => ReadinessStatus::Ready(
-                        "external mongodb+srv URI configured (no local server to check)".into(),
+                    // `mongodb+srv://` has no single target to probe — the
+                    // authoritative check is that the hostname resolves at all,
+                    // so a typo'd Atlas host fails here instead of passing green.
+                    None => srv_hostname(&uri).map_or_else(
+                        || ReadinessStatus::NotReady {
+                            reason: "could not parse a hostname from the mongodb URI".into(),
+                            remedy: "Check the MONGODB_URI / MONGO_URI / DATABASE_URL value".into(),
+                        },
+                        |host| {
+                            if hostname_resolves(&host) {
+                                ReadinessStatus::Ready(
+                                    "external mongodb+srv target resolves (no local server to check)".into(),
+                                )
+                            } else {
+                                ReadinessStatus::NotReady {
+                                    reason: format!("mongodb+srv hostname {host} does not resolve"),
+                                    remedy: "Check the mongodb+srv connection string".into(),
+                                }
+                            }
+                        },
                     ),
                 },
             ));
@@ -236,6 +254,28 @@ fn reachable(host: &str, port: u16) -> bool {
         })
 }
 
+/// Extracts the hostname of a `mongodb+srv://` URI (the scheme these URIs use
+/// instead of a fixed `host:port`), stripping credentials. Returns `None` when
+/// the URI is not an srv URI or has no hostname.
+fn srv_hostname(uri: &str) -> Option<String> {
+    let authority = uri.strip_prefix("mongodb+srv://")?.split('/').next()?;
+    let authority = authority.rsplit('@').next()?;
+    let host = authority.split_once(':').map_or(authority, |(h, _)| h);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+/// True when the hostname resolves to at least one address (DNS lookup, no
+/// connection). Used as the readiness probe for externally-managed `srv` URIs.
+fn hostname_resolves(host: &str) -> bool {
+    format!("{host}:27017")
+        .to_socket_addrs()
+        .is_ok_and(|mut addrs| addrs.next().is_some())
+}
+
 /// Compose-backed: the `docker-up` task already started the service; just confirm it responds.
 fn mongo_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
     let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, LOCAL_PORT);
@@ -272,8 +312,9 @@ fn mongo_uri_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutc
         )))
     } else {
         emit(&format!("mongodb target {host}:{port} not reachable"));
-        Ok(RunOutcome::Skipped(
-            "mongodb URI configured, nothing to start".into(),
-        ))
+        Err(RunError::Failed(format!(
+            "mongodb is not responding on {host}:{port} and there is no docker-compose service to start it. \
+            Start it yourself (e.g. `docker run -d -p {port}:27017 mongo`), then re-run upone."
+        )))
     }
 }
