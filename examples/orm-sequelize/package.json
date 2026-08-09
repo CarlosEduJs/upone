@@ -1,0 +1,12 @@
+{
+  "name": "orm-sequelize",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "sequelize": "^6.37.0",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "sequelize-cli": "^6.6.0"
+  }
+}

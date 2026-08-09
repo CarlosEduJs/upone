@@ -89,6 +89,65 @@ pub fn any_exists(cwd: &Path, files: &[&str]) -> bool {
     files.iter().any(|f| cwd.join(f).exists())
 }
 
+/// Returns the Python install task id detected in the project (if any).
+/// Used by providers that depend on the project's deps being installed
+/// (alembic, sqlalchemy).
+///
+/// Mirrors [`js_install_task`]: walks up from `cwd` to the filesystem root so a
+/// monorepo package can depend on the root's install task.
+pub fn python_install_task(cwd: &Path) -> Option<&'static str> {
+    let mut dir = Some(cwd);
+    while let Some(d) = dir {
+        let id = if d.join("uv.lock").is_file() {
+            Some("uv-sync")
+        } else if d.join("poetry.lock").is_file() {
+            Some("poetry-install")
+        } else if super::python::has_requirements(d) {
+            Some("pip-install")
+        } else {
+            None
+        };
+        if let Some(id) = id {
+            return Some(id);
+        }
+        dir = d.parent();
+    }
+    None
+}
+
+/// Resolves the id of the database task that starts/verifies the DB an ORM
+/// migration targets, so a migration runs only after its DB is up.
+///
+/// Matches the same signals the DB providers use: a `postgres`/`mysql`/
+/// `mariadb`/`mongo` service in docker-compose, or a sqlite `DATABASE_URL`.
+/// Returns `None` when the DB is external (no provider task exists — the
+/// migration will simply try against it).
+pub fn migration_db_dep(cwd: &Path) -> Option<&'static str> {
+    let compose = [
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "compose.yml",
+        "compose.yaml",
+    ];
+    if files_contain(cwd, &compose, &["postgres", "postgresql"]) {
+        return Some("postgres-up");
+    }
+    if files_contain(cwd, &compose, &["mysql", "mariadb"]) {
+        return Some("mysql-up");
+    }
+    if files_contain(cwd, &compose, &["mongo", "mongodb"]) {
+        return Some("mongo-up");
+    }
+    if files_contain(
+        cwd,
+        &[".env", ".env.local"],
+        &["sqlite://", "DATABASE_URL=sqlite"],
+    ) {
+        return Some("sqlite-ensure");
+    }
+    None
+}
+
 /// Resolves the host port a service is published on in the given compose files.
 ///
 /// Matches port mappings like `- "15432:5432"` / `- 15432:5432` where the
