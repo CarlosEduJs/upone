@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0
+
+Crate versions in this release:
+
+| Crate | Version |
+| --- | --- |
+| upone | 0.6.0 |
+| upone-core | 0.3.0 |
+| upone-providers | 0.6.0 |
+
+### upone
+
+- update upone-providers 0.5.0 -> 0.6.0
+
+### upone-providers
+
+- Add TypeORM, Sequelize, Knex, EF Core .NET, Alembic, GORM and SQLAlchemy providers
 ## 0.5.0
 
 Crate versions in this release:
