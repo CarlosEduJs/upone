@@ -5,7 +5,7 @@ use upone_core::plan::{Planner, RunOutcome, Task};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{spawn_cmd, which};
+use crate::cmd::{check_binary, spawn_cmd, which};
 
 pub struct Cargo;
 
@@ -25,7 +25,13 @@ impl Provider for Cargo {
             "checks that cargo is on PATH",
         )
         .risk(Risk::Low)
-        .run(check_cargo);
+        .run(|_ctx, emit| {
+            check_binary(
+                "cargo",
+                "Install Rust via rustup: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`",
+                emit,
+            )
+        });
 
         let build = Task::new(
             "cargo-build",
@@ -79,17 +85,6 @@ impl Provider for Cargo {
                 },
             ),
         ]
-    }
-}
-
-fn check_cargo(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    if which("cargo") {
-        emit("cargo found on PATH");
-        Ok(RunOutcome::Ran("cargo installed".into()))
-    } else {
-        Err(RunError::Failed(
-            "cargo not found on PATH. Install Rust via rustup: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`".into(),
-        ))
     }
 }
 

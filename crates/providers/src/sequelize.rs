@@ -9,13 +9,13 @@ use std::path::Path;
 
 use upone_core::detect::Provider;
 use upone_core::plan::{Planner, RunOutcome, Task};
-use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
+use upone_core::readiness::ReadinessCheck;
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
 use crate::cmd::{
-    js_install_task, js_managed, local_cli, migration_db_dep, package_has_dependency, spawn_cmd,
-    which,
+    add_migration_plan, js_managed, local_cli, package_has_dependency, spawn_cmd, which,
+    InstallKind,
 };
 
 pub struct Sequelize;
@@ -49,7 +49,7 @@ impl Provider for Sequelize {
     }
 
     fn plan(&self, ctx: &Context, planner: &mut Planner<'_>) {
-        let mut check = Task::new(
+        let check = Task::new(
             "sequelize-check",
             "check sequelize available",
             "checks that the local sequelize-cli binary is installed",
@@ -57,44 +57,23 @@ impl Provider for Sequelize {
         .risk(Risk::Low)
         .run(check_sequelize);
 
-        let mut migrate = Task::new(
+        let migrate = Task::new(
             "sequelize-migrate",
             "sequelize-cli db:migrate",
             "applies pending sequelize migrations to the configured database (safe to repeat)",
         )
         .risk(Risk::High)
-        .depends_on(["sequelize-check"])
         .run(sequelize_migrate);
 
-        if let Some(install) = js_install_task(&ctx.cwd) {
-            check = check.depends_on([install]);
-            migrate = migrate.depends_on(["sequelize-check", install]);
-        }
-        if let Some(db) = migration_db_dep(&ctx.cwd) {
-            migrate = migrate.depends_on(["sequelize-check", db]);
-        }
-
-        planner.add(check);
-        planner.add(migrate);
+        add_migration_plan(planner, ctx, check, migrate, InstallKind::Js, true);
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<ReadinessCheck> {
-        let cwd = ctx.cwd.clone();
-        vec![ReadinessCheck::new(
+        vec![crate::cmd::node_modules_check(
             "sequelize-deps",
-            "sequelize dependencies installed",
-            "node_modules present for sequelize",
-            Importance::Required,
-            move |_ctx| {
-                if crate::cmd::node_modules_present(&cwd) {
-                    ReadinessStatus::Ready("node_modules present".into())
-                } else {
-                    ReadinessStatus::NotReady {
-                        reason: "node_modules missing for sequelize".into(),
-                        remedy: "Run your package manager's install or 'upone up'".into(),
-                    }
-                }
-            },
+            "sequelize",
+            "Run your package manager's install or 'upone up'",
+            &ctx.cwd,
         )]
     }
 }

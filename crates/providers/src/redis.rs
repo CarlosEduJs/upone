@@ -8,14 +8,13 @@
 //! clear, actionable error instead of firing a broken `docker compose up`.
 
 use std::path::Path;
-use std::time::Duration;
 
 use upone_core::detect::Provider;
 use upone_core::plan::{Planner, RunOutcome, Task};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{compose_host_port, files_contain};
+use crate::cmd::{compose_host_port, files_contain, tcp_reachable};
 
 const COMPOSE_FILES: &[&str] = &[
     "docker-compose.yml",
@@ -86,7 +85,7 @@ impl Provider for Redis {
             "Redis is accepting TCP connections",
             Importance::Required,
             move |_ctx| {
-                if redis_reachable(port) {
+                if tcp_reachable("127.0.0.1", port) {
                     ReadinessStatus::Ready(format!("responding on localhost:{port}"))
                 } else {
                     ReadinessStatus::NotReady {
@@ -99,18 +98,10 @@ impl Provider for Redis {
     }
 }
 
-fn redis_reachable(port: u16) -> bool {
-    use std::net::TcpStream;
-    let Ok(addr) = format!("127.0.0.1:{port}").parse() else {
-        return false;
-    };
-    TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
-}
-
 /// Compose-backed: the `docker-up` task already started the service; just confirm it responds.
 fn redis_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
     let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 6379);
-    if redis_reachable(port) {
+    if tcp_reachable("127.0.0.1", port) {
         emit(&format!("redis responding on localhost:{port}"));
         Ok(RunOutcome::Skipped("redis already up".into()))
     } else {
@@ -125,7 +116,7 @@ fn redis_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome,
 /// No compose definition: nothing here can start redis, so it reports clearly.
 fn redis_check(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
     let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 6379);
-    if redis_reachable(port) {
+    if tcp_reachable("127.0.0.1", port) {
         emit(&format!("redis responding on localhost:{port}"));
         Ok(RunOutcome::Skipped("redis already up".into()))
     } else {

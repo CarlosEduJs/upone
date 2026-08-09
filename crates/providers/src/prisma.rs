@@ -7,7 +7,7 @@ use upone_core::plan::{Planner, RunOutcome, Task};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{spawn_cmd, which};
+use crate::cmd::{add_migration_plan, spawn_cmd, which, InstallKind};
 
 pub struct Prisma;
 
@@ -29,7 +29,7 @@ impl Provider for Prisma {
     }
 
     fn plan(&self, ctx: &Context, planner: &mut Planner<'_>) {
-        let mut check = Task::new(
+        let check = Task::new(
             "prisma-check",
             "check prisma available",
             "checks dependencies and the prisma CLI",
@@ -37,22 +37,15 @@ impl Provider for Prisma {
         .risk(Risk::Low)
         .run(check_prisma);
 
-        let mut gen = Task::new(
+        let gen = Task::new(
             "prisma-generate",
             "prisma generate",
             "generates the Prisma client from the schema (safe to repeat)",
         )
         .risk(Risk::Medium)
-        .depends_on(["prisma-check"])
         .run(prisma_generate);
 
-        if let Some(install) = crate::cmd::js_install_task(&ctx.cwd) {
-            check = check.depends_on([install]);
-            gen = gen.depends_on(["prisma-check", install]);
-        }
-
-        planner.add(check);
-        planner.add(gen);
+        add_migration_plan(planner, ctx, check, gen, InstallKind::Js, false);
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {

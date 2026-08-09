@@ -9,7 +9,6 @@
 //! directly — an external authority (e.g. `db.internal:3307`) is validated, not
 //! started.
 
-use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::time::Duration;
 
@@ -19,7 +18,9 @@ use upone_core::readiness::resolve_env_key;
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{compose_host_port, files_contain};
+use crate::cmd::{
+    compose_host_port, env_key_check, files_contain, parse_uri_authority, tcp_reachable,
+};
 
 const COMPOSE_FILES: &[&str] = &[
     "docker-compose.yml",
@@ -31,8 +32,6 @@ const COMPOSE_FILES: &[&str] = &[
 const ENV_FILES: &[&str] = &[".env", ".env.local"];
 
 const LOCAL_PORT: u16 = 3306;
-
-const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
 
 /// Bounded wait for the compose service to start responding.
 const VERIFY_DEADLINE: Duration = Duration::from_secs(30);
@@ -108,7 +107,7 @@ impl Provider for Mysql {
             "MySQL is accepting TCP connections",
             Importance::Required,
             move |_| {
-                if mysql_reachable(&host, port) {
+                if tcp_reachable(&host, port) {
                     ReadinessStatus::Ready(format!("responding on {host}:{port}"))
                 } else {
                     ReadinessStatus::NotReady {
@@ -121,23 +120,7 @@ impl Provider for Mysql {
             },
         )];
 
-        let cwd = ctx.cwd.clone();
-        checks.push(ReadinessCheck::new(
-            "env-DATABASE_URL",
-            "DATABASE_URL",
-            "DATABASE_URL environment variable is set",
-            Importance::Required,
-            move |_ctx| {
-                if resolve_env_key(&cwd, "DATABASE_URL").is_some() {
-                    ReadinessStatus::Ready("found".into())
-                } else {
-                    ReadinessStatus::NotReady {
-                        reason: "DATABASE_URL not found in process env or .env* files".into(),
-                        remedy: "Add DATABASE_URL to your .env.local or shell environment".into(),
-                    }
-                }
-            },
-        ));
+        checks.push(env_key_check("env-DATABASE_URL", "DATABASE_URL", &ctx.cwd));
 
         checks
     }
@@ -163,36 +146,7 @@ fn mysql_target(cwd: &Path) -> (String, u16) {
 /// not a mysql/mariadb URL or has no resolvable authority (e.g. unix sockets).
 fn mysql_database_url_target(cwd: &Path) -> Option<(String, u16)> {
     let url = resolve_env_key(cwd, "DATABASE_URL")?;
-    let url = match url.split_once('?') {
-        Some((url, _)) => url.to_string(),
-        None => url,
-    };
-    let authority = url
-        .strip_prefix("mysql://")
-        .or_else(|| url.strip_prefix("mariadb://"))?
-        .split('/')
-        .next()?
-        .rsplit('@')
-        .next()?;
-    if authority.is_empty() || authority.starts_with('/') {
-        return None;
-    }
-    match authority.rsplit_once(':') {
-        Some((host, port)) if !host.is_empty() && port.parse::<u16>().is_ok() => {
-            Some((host.to_string(), port.parse::<u16>().ok()?))
-        }
-        _ => Some((authority.to_string(), LOCAL_PORT)),
-    }
-}
-
-fn mysql_reachable(host: &str, port: u16) -> bool {
-    format!("{host}:{port}")
-        .to_socket_addrs()
-        .is_ok_and(|mut addrs| {
-            addrs
-                .find_map(|addr| TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).ok())
-                .is_some()
-        })
+    parse_uri_authority(&url, &["mysql", "mariadb"], LOCAL_PORT)
 }
 
 /// Compose-backed: the `docker-up` task started the service; poll until it
@@ -201,7 +155,7 @@ fn mysql_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome,
     let (host, port) = mysql_target(&ctx.cwd);
     let deadline = std::time::Instant::now() + VERIFY_DEADLINE;
     loop {
-        if mysql_reachable(&host, port) {
+        if tcp_reachable(&host, port) {
             emit(&format!("mysql responding on {host}:{port}"));
             return Ok(RunOutcome::Skipped("mysql already up".into()));
         }
@@ -217,7 +171,7 @@ fn mysql_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome,
 /// No compose definition: nothing here can start mysql, so it reports clearly.
 fn mysql_check(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
     let (host, port) = mysql_target(&ctx.cwd);
-    if mysql_reachable(&host, port) {
+    if tcp_reachable(&host, port) {
         emit(&format!("mysql responding on {host}:{port}"));
         Ok(RunOutcome::Skipped("mysql already up".into()))
     } else {
@@ -236,10 +190,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("upone-mysql-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::testkit::temp_dir("mysql", name)
     }
 
     fn with_env(dir: &Path, url: &str) {

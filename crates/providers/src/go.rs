@@ -5,7 +5,7 @@ use upone_core::plan::{Planner, RunOutcome, Task};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{spawn_cmd, which_probe};
+use crate::cmd::{check_binary_probe, spawn_cmd, which_probe};
 
 pub struct Go;
 
@@ -25,7 +25,9 @@ impl Provider for Go {
             "checks that the go toolchain is on PATH",
         )
         .risk(Risk::Low)
-        .run(check_go);
+        .run(|_ctx, emit| {
+            check_binary_probe("go", "version", "Install it via https://go.dev/dl", emit)
+        });
 
         let tidy = Task::new(
             "go-tidy",
@@ -69,17 +71,6 @@ impl Provider for Go {
                 }
             },
         )]
-    }
-}
-
-fn check_go(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    if which_probe("go", "version") {
-        emit("go found on PATH");
-        Ok(RunOutcome::Ran("go installed".into()))
-    } else {
-        Err(RunError::Failed(
-            "go not found on PATH. Install it via https://go.dev/dl".into(),
-        ))
     }
 }
 

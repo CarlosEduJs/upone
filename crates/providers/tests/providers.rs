@@ -8,7 +8,7 @@ use upone_core::detect::detect;
 use upone_providers::build_registry;
 
 fn in_dir(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("upone-prov-{name}"));
+    let dir = std::env::temp_dir().join(format!("upone-prov-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     for (path, content) in files {

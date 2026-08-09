@@ -8,14 +8,13 @@
 //! clear, actionable error instead of firing a broken `docker compose up`.
 
 use std::path::Path;
-use std::time::Duration;
 
 use upone_core::detect::Provider;
 use upone_core::plan::{Planner, RunOutcome, Task};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{compose_host_port, files_contain};
+use crate::cmd::{compose_host_port, env_key_check, files_contain, tcp_reachable};
 
 const COMPOSE_FILES: &[&str] = &[
     "docker-compose.yml",
@@ -84,7 +83,7 @@ impl Provider for Postgres {
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
-        use upone_core::readiness::{resolve_env_key, Importance, ReadinessCheck, ReadinessStatus};
+        use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
 
         let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 5432);
         let mut checks = vec![ReadinessCheck::new(
@@ -93,7 +92,7 @@ impl Provider for Postgres {
             "PostgreSQL is accepting TCP connections",
             Importance::Required,
             move |_ctx| {
-                if postgres_reachable(port) {
+                if tcp_reachable("127.0.0.1", port) {
                     ReadinessStatus::Ready(format!("responding on localhost:{port}"))
                 } else {
                     ReadinessStatus::NotReady {
@@ -105,40 +104,20 @@ impl Provider for Postgres {
         )];
 
         // DATABASE_URL env key check.
-        let cwd = ctx.cwd.clone();
-        checks.push(ReadinessCheck::new(
-            "env-DATABASE_URL",
-            "DATABASE_URL",
-            "DATABASE_URL environment variable is set",
-            Importance::Required,
-            move |_ctx| {
-                if resolve_env_key(&cwd, "DATABASE_URL").is_some() {
-                    ReadinessStatus::Ready("found".into())
-                } else {
-                    ReadinessStatus::NotReady {
-                        reason: "DATABASE_URL not found in process env or .env* files".into(),
-                        remedy: "Add DATABASE_URL to your .env.local or shell environment".into(),
-                    }
-                }
-            },
-        ));
-
+        check_env_key(&ctx.cwd, &mut checks);
         checks
     }
 }
 
-fn postgres_reachable(port: u16) -> bool {
-    use std::net::TcpStream;
-    let Ok(addr) = format!("127.0.0.1:{port}").parse() else {
-        return false;
-    };
-    TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
+/// Adds the `env-DATABASE_URL` readiness check.
+fn check_env_key(cwd: &Path, checks: &mut Vec<upone_core::readiness::ReadinessCheck>) {
+    checks.push(env_key_check("env-DATABASE_URL", "DATABASE_URL", cwd));
 }
 
 /// Compose-backed: the `docker-up` task already started the service; just confirm it responds.
 fn postgres_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
     let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 5432);
-    if postgres_reachable(port) {
+    if tcp_reachable("127.0.0.1", port) {
         emit(&format!("postgres responding on localhost:{port}"));
         Ok(RunOutcome::Skipped("postgres already up".into()))
     } else {
@@ -153,7 +132,7 @@ fn postgres_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutco
 /// No compose definition: nothing here can start postgres, so it reports clearly.
 fn postgres_check(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
     let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 5432);
-    if postgres_reachable(port) {
+    if tcp_reachable("127.0.0.1", port) {
         emit(&format!("postgres responding on localhost:{port}"));
         Ok(RunOutcome::Skipped("postgres already up".into()))
     } else {

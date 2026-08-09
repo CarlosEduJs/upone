@@ -13,8 +13,8 @@ use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
 use crate::cmd::{
-    js_install_task, local_cli, migration_db_dep, node_modules_present, package_has_dependency,
-    spawn_cmd, which,
+    add_migration_plan, local_cli, node_modules_present, package_has_dependency, spawn_cmd, which,
+    InstallKind,
 };
 
 const DATA_SOURCE_FILES: &[&str] = &[
@@ -65,7 +65,7 @@ impl Provider for Typeorm {
     }
 
     fn plan(&self, ctx: &Context, planner: &mut Planner<'_>) {
-        let mut check = Task::new(
+        let check = Task::new(
             "typeorm-check",
             "check typeorm available",
             "checks dependencies and the typeorm CLI",
@@ -73,25 +73,15 @@ impl Provider for Typeorm {
         .risk(Risk::Low)
         .run(check_typeorm);
 
-        let mut migrate = Task::new(
+        let migrate = Task::new(
             "typeorm-migrate",
             "typeorm migration:run",
             "applies pending typeorm migrations to the configured database (safe to repeat)",
         )
         .risk(Risk::High)
-        .depends_on(["typeorm-check"])
         .run(typeorm_migrate);
 
-        if let Some(install) = js_install_task(&ctx.cwd) {
-            check = check.depends_on([install]);
-            migrate = migrate.depends_on(["typeorm-check", install]);
-        }
-        if let Some(db) = migration_db_dep(&ctx.cwd) {
-            migrate = migrate.depends_on(["typeorm-check", db]);
-        }
-
-        planner.add(check);
-        planner.add(migrate);
+        add_migration_plan(planner, ctx, check, migrate, InstallKind::Js, true);
     }
 }
 

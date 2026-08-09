@@ -13,7 +13,7 @@ use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{migration_db_dep, spawn_cmd, which};
+use crate::cmd::{check_binary, migration_db_dep, spawn_cmd, which};
 
 pub struct EfCore;
 
@@ -41,7 +41,13 @@ impl Provider for EfCore {
             "checks that the dotnet SDK is on PATH",
         )
         .risk(Risk::Low)
-        .run(check_dotnet);
+        .run(|_ctx, emit| {
+            check_binary(
+                "dotnet",
+                "Install the .NET SDK via https://dotnet.microsoft.com/download",
+                emit,
+            )
+        });
 
         let restore = Task::new(
             "ef-restore",
@@ -143,17 +149,6 @@ fn csproj_has_ef(path: &Path) -> bool {
     })
 }
 
-fn check_dotnet(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    if which("dotnet") {
-        emit("dotnet found on PATH");
-        Ok(RunOutcome::Ran("dotnet installed".into()))
-    } else {
-        Err(RunError::Failed(
-            "dotnet not found on PATH. Install the .NET SDK via https://dotnet.microsoft.com/download".into(),
-        ))
-    }
-}
-
 fn dotnet_restore(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
     // Install the local `dotnet-ef` tool manifest if present; then restore
     // packages. Both are idempotent. The tool manifest lives next to the
@@ -213,10 +208,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("upone-ef-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::testkit::temp_dir("ef", name)
     }
 
     #[test]

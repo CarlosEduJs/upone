@@ -7,9 +7,8 @@
 //! definition upone cannot start mongodb, so an externally configured URI is
 //! only verified against its own target — it is never started.
 
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::ToSocketAddrs;
 use std::path::Path;
-use std::time::Duration;
 
 use upone_core::detect::Provider;
 use upone_core::plan::{Planner, RunOutcome, Task};
@@ -17,7 +16,7 @@ use upone_core::readiness::resolve_env_key;
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{compose_host_port, files_contain};
+use crate::cmd::{compose_host_port, files_contain, parse_uri_authority, tcp_reachable};
 
 const COMPOSE_FILES: &[&str] = &[
     "docker-compose.yml",
@@ -26,13 +25,11 @@ const COMPOSE_FILES: &[&str] = &[
     "compose.yaml",
 ];
 
-const ENV_FILES: &[&str] = &[".env", ".env.local"];
-
 const MONGODB_KEYS: &[&str] = &["MONGODB_URI", "MONGO_URI", "DATABASE_URL"];
 
-const LOCAL_PORT: u16 = 27017;
+const ENV_FILES: &[&str] = &[".env", ".env.local"];
 
-const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
+const LOCAL_PORT: u16 = 27017;
 
 pub struct Mongo;
 
@@ -103,7 +100,7 @@ impl Provider for Mongo {
                 "MongoDB is accepting TCP connections",
                 Importance::Required,
                 move |_| {
-                    if reachable("127.0.0.1", port) {
+if tcp_reachable("127.0.0.1", port) {
                         ReadinessStatus::Ready(format!("responding on localhost:{port}"))
                     } else {
                         ReadinessStatus::NotReady {
@@ -120,7 +117,7 @@ impl Provider for Mongo {
                 "MongoDB target from the configured URI is reachable",
                 Importance::Required,
                 move |_| match mongodb_target(&uri) {
-                    Some((host, port)) if reachable(&host, port) => {
+                    Some((host, port)) if tcp_reachable(&host, port) => {
                         ReadinessStatus::Ready(format!("responding on {host}:{port}"))
                     }
                     Some((host, port)) => ReadinessStatus::NotReady {
@@ -231,27 +228,7 @@ fn mongo_uri(cwd: &Path) -> Option<String> {
 /// credentials and database part. Returns `None` for `mongodb+srv://` URIs
 /// (no single directly-connectable target) or unparseable authorities.
 fn mongodb_target(uri: &str) -> Option<(String, u16)> {
-    let authority = uri.strip_prefix("mongodb://")?.split('/').next()?;
-    let authority = authority.rsplit('@').next()?;
-    if authority.is_empty() {
-        return None;
-    }
-    match authority.rsplit_once(':') {
-        Some((host, port)) if !host.is_empty() && port.parse::<u16>().is_ok() => {
-            Some((host.to_string(), port.parse::<u16>().ok()?))
-        }
-        _ => Some((authority.to_string(), LOCAL_PORT)),
-    }
-}
-
-fn reachable(host: &str, port: u16) -> bool {
-    format!("{host}:{port}")
-        .to_socket_addrs()
-        .is_ok_and(|mut addrs| {
-            addrs
-                .find_map(|addr| TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).ok())
-                .is_some()
-        })
+    parse_uri_authority(uri, &["mongodb"], LOCAL_PORT)
 }
 
 /// Extracts the hostname of a `mongodb+srv://` URI (the scheme these URIs use
@@ -279,7 +256,7 @@ fn hostname_resolves(host: &str) -> bool {
 /// Compose-backed: the `docker-up` task already started the service; just confirm it responds.
 fn mongo_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
     let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, LOCAL_PORT);
-    if reachable("127.0.0.1", port) {
+    if tcp_reachable("127.0.0.1", port) {
         emit(&format!("mongodb responding on localhost:{port}"));
         Ok(RunOutcome::Skipped("mongodb already up".into()))
     } else {
@@ -305,7 +282,7 @@ fn mongo_uri_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutc
             "external mongodb URI, nothing to start".into(),
         ));
     };
-    if reachable(&host, port) {
+    if tcp_reachable(&host, port) {
         emit(&format!("mongodb responding on {host}:{port}"));
         Ok(RunOutcome::Skipped(format!(
             "mongodb already up ({host}:{port})"

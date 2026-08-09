@@ -9,7 +9,7 @@ use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
 use upone_core::run::RunError;
 use upone_core::{Context, Detection, Risk};
 
-use crate::cmd::{spawn_cmd, which};
+use crate::cmd::{check_binary, spawn_cmd, which};
 
 pub struct Php;
 
@@ -93,20 +93,12 @@ impl Provider for Php {
 }
 
 fn check_php(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    if !which("php") {
-        return Err(RunError::Failed(
-            "php not found on PATH. Install it via https://www.php.net/downloads".into(),
-        ));
-    }
-    emit("php found on PATH");
-    if which("composer") {
-        emit("composer found on PATH");
-        Ok(RunOutcome::Ran("composer installed".into()))
-    } else {
-        Err(RunError::Failed(
-            "composer not found on PATH. Install it via https://getcomposer.org/download/".into(),
-        ))
-    }
+    check_binary("php", "Install it via https://www.php.net/downloads", emit)?;
+    check_binary(
+        "composer",
+        "Install it via https://getcomposer.org/download/",
+        emit,
+    )
 }
 
 fn composer_install(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
