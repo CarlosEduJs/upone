@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.0
+
+- Add TypeORM, Sequelize, Knex, EF Core .NET, Alembic, GORM and SQLAlchemy providers
 ## 0.5.0
 
 - Added the `mysql` provider (detects `mysql`/`mariadb` in docker-compose or a `mysql://`/`mariadb://` `DATABASE_URL`, ensures the service responds on `localhost:3306`).
