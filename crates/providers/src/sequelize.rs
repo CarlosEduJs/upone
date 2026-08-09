@@ -13,7 +13,10 @@ use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{js_install_task, migration_db_dep, package_has_dependency, spawn_cmd, which};
+use crate::cmd::{
+    js_install_task, js_managed, local_cli, migration_db_dep, package_has_dependency, spawn_cmd,
+    which,
+};
 
 pub struct Sequelize;
 
@@ -27,7 +30,7 @@ impl Provider for Sequelize {
     }
 
     fn detect(&self, cwd: &Path) -> Option<upone_core::Detection> {
-        if package_has_dependency(cwd, "sequelize") {
+        if js_managed(cwd) && package_has_dependency(cwd, "sequelize") {
             return Some(upone_core::Detection {
                 provider: self.id(),
                 signature: "package.json (sequelize)".into(),
@@ -35,7 +38,7 @@ impl Provider for Sequelize {
             });
         }
         // sequelize-cli default layout: config/ carries the connection config.
-        if cwd.join("config").join("config.json").is_file() {
+        if js_managed(cwd) && cwd.join("config").join("config.json").is_file() {
             return Some(upone_core::Detection {
                 provider: self.id(),
                 signature: "sequelize-cli structure".into(),
@@ -49,7 +52,7 @@ impl Provider for Sequelize {
         let mut check = Task::new(
             "sequelize-check",
             "check sequelize available",
-            "checks dependencies and the sequelize-cli tooling",
+            "checks that the local sequelize-cli binary is installed",
         )
         .risk(Risk::Low)
         .run(check_sequelize);
@@ -102,7 +105,12 @@ fn check_sequelize(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutco
             "node_modules missing. Install the project dependencies first (e.g. `upone up` installs them, or run your package manager's install).".into(),
         ));
     }
-    emit("dependencies present");
+    if !local_cli(&ctx.cwd, "sequelize-cli") {
+        return Err(RunError::Failed(
+            "sequelize-cli is not installed locally. Add it as a devDependency and run the install task (a registry-installed npx binary would be fetched on demand, which upone avoids)".into(),
+        ));
+    }
+    emit("dependencies present, sequelize-cli installed locally");
     Ok(RunOutcome::Ran("sequelize available".into()))
 }
 
@@ -110,5 +118,10 @@ fn sequelize_migrate(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOut
     if !which("npx") {
         return Err(RunError::Failed("npx not found on PATH".into()));
     }
-    spawn_cmd("npx", &["sequelize-cli", "db:migrate"], &ctx.cwd, emit)
+    spawn_cmd(
+        "npx",
+        &["--no-install", "sequelize-cli", "db:migrate"],
+        &ctx.cwd,
+        emit,
+    )
 }

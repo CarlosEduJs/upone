@@ -489,17 +489,21 @@ fn detects_typeorm() {
 fn detects_sequelize() {
     let dir = in_dir(
         "sequelize",
-        &[("package.json", r#"{"dependencies":{"sequelize":"^6.0.0"}}"#)],
+        &[
+            ("package.json", r#"{"dependencies":{"sequelize":"^6.0.0"}}"#),
+            ("package-lock.json", "{}"),
+        ],
     );
     assert!(ids(&dir).contains(&"sequelize".to_string()));
     let _ = std::fs::remove_dir_all(&dir);
 
-    // sequelize-cli layout alone matches.
+    // sequelize-cli layout alone matches, when the project is managed.
     let dir = in_dir(
         "sequelize-layout",
         &[
             ("config/config.json", "{\"development\":{}}"),
             ("migrations/1-init.js", "module.exports.up = () => {};"),
+            ("package-lock.json", "{}"),
         ],
     );
     assert!(ids(&dir).contains(&"sequelize".to_string()));
@@ -510,7 +514,10 @@ fn detects_sequelize() {
 fn detects_knex() {
     let dir = in_dir(
         "knex",
-        &[("package.json", r#"{"dependencies":{"knex":"^3.0.0"}}"#)],
+        &[
+            ("package.json", r#"{"dependencies":{"knex":"^3.0.0"}}"#),
+            ("package-lock.json", "{}"),
+        ],
     );
     assert!(ids(&dir).contains(&"knex".to_string()));
     let _ = std::fs::remove_dir_all(&dir);

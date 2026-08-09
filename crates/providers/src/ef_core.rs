@@ -156,7 +156,15 @@ fn check_dotnet(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome
 
 fn dotnet_restore(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
     // Install the local `dotnet-ef` tool manifest if present; then restore
-    // packages. Both are idempotent.
+    // packages. Both are idempotent. The tool manifest lives next to the
+    // detected project, so resolve it from there when the project is nested.
+    if let Some((proj_rel, proj_dir)) = located_project(&ctx.cwd) {
+        let manifest = proj_dir.join(".config").join("dotnet-tools.json");
+        if manifest.is_file() {
+            spawn_cmd("dotnet", &["tool", "restore"], &proj_dir, emit)?;
+        }
+        return spawn_cmd("dotnet", &["restore", &proj_rel], &ctx.cwd, emit);
+    }
     if ctx.cwd.join(".config").join("dotnet-tools.json").is_file() {
         spawn_cmd("dotnet", &["tool", "restore"], &ctx.cwd, emit)?;
     }
@@ -169,7 +177,32 @@ fn ef_database_update(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOu
             "dotnet not found on PATH, cannot run 'dotnet ef database update'".into(),
         ));
     }
-    spawn_cmd("dotnet", &["ef", "database", "update"], &ctx.cwd, emit)
+    match located_project(&ctx.cwd) {
+        Some((proj_rel, _)) => spawn_cmd(
+            "dotnet",
+            &[
+                "ef",
+                "database",
+                "update",
+                "--project",
+                &proj_rel,
+                "--startup-project",
+                &proj_rel,
+            ],
+            &ctx.cwd,
+            emit,
+        ),
+        None => spawn_cmd("dotnet", &["ef", "database", "update"], &ctx.cwd, emit),
+    }
+}
+
+/// Returns the detected project's path relative to `cwd` and its absolute
+/// directory (the `.csproj` parent), so tasks target the real application
+/// instead of running in the workspace root.
+fn located_project(cwd: &Path) -> Option<(String, std::path::PathBuf)> {
+    let rel = find_csproj_with_ef(cwd)?;
+    let dir = cwd.join(&rel).parent().map(Path::to_path_buf)?;
+    Some((rel, dir))
 }
 
 #[cfg(test)]

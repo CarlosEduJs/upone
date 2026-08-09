@@ -2,11 +2,15 @@
   "name": "orm-typeorm",
   "version": "0.1.0",
   "private": true,
+  "scripts": {
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts"
+  },
   "dependencies": {
     "typeorm": "^0.3.20",
     "pg": "^8.13.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "ts-node": "^10.9.2"
   }
 }

@@ -12,7 +12,10 @@ use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{js_install_task, migration_db_dep, package_has_dependency, spawn_cmd, which};
+use crate::cmd::{
+    js_install_task, js_managed, local_cli, migration_db_dep, node_modules_present,
+    package_has_dependency, spawn_cmd, which,
+};
 
 const KNEXFILES: &[&str] = &["knexfile.ts", "knexfile.js", "knexfile.mts", "knexfile.cts"];
 
@@ -28,7 +31,7 @@ impl Provider for Knex {
     }
 
     fn detect(&self, cwd: &Path) -> Option<upone_core::Detection> {
-        if package_has_dependency(cwd, "knex") {
+        if js_managed(cwd) && package_has_dependency(cwd, "knex") {
             return Some(upone_core::Detection {
                 provider: self.id(),
                 signature: "package.json (knex)".into(),
@@ -51,7 +54,7 @@ impl Provider for Knex {
         let mut check = Task::new(
             "knex-check",
             "check knex available",
-            "checks dependencies and the knex CLI",
+            "checks that the local knex binary is installed",
         )
         .risk(Risk::Low)
         .run(check_knex);
@@ -85,7 +88,7 @@ impl Provider for Knex {
             "node_modules present for knex",
             Importance::Required,
             move |_ctx| {
-                if crate::cmd::node_modules_present(&cwd) {
+                if node_modules_present(&cwd) {
                     ReadinessStatus::Ready("node_modules present".into())
                 } else {
                     ReadinessStatus::NotReady {
@@ -99,12 +102,17 @@ impl Provider for Knex {
 }
 
 fn check_knex(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    if !crate::cmd::node_modules_present(&ctx.cwd) {
+    if !node_modules_present(&ctx.cwd) {
         return Err(RunError::Failed(
             "node_modules missing. Install the project dependencies first (e.g. `upone up` installs them, or run your package manager's install).".into(),
         ));
     }
-    emit("dependencies present");
+    if !local_cli(&ctx.cwd, "knex") {
+        return Err(RunError::Failed(
+            "knex is not installed locally. Add it as a dependency and run the install task (upone won't let npx fetch it from the registry on demand).".into(),
+        ));
+    }
+    emit("dependencies present, knex CLI present");
     Ok(RunOutcome::Ran("knex available".into()))
 }
 
@@ -112,5 +120,10 @@ fn knex_migrate(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome,
     if !which("npx") {
         return Err(RunError::Failed("npx not found on PATH".into()));
     }
-    spawn_cmd("npx", &["knex", "migrate:latest"], &ctx.cwd, emit)
+    spawn_cmd(
+        "npx",
+        &["--no-install", "knex", "migrate:latest"],
+        &ctx.cwd,
+        emit,
+    )
 }

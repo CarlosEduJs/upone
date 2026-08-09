@@ -38,7 +38,7 @@ impl Provider for Alembic {
         let mut check = Task::new(
             "alembic-check",
             "check python venv for alembic",
-            "checks that the project venv exists so alembic can run inside it",
+            "checks that the project venv has the alembic module installed",
         )
         .risk(Risk::Low)
         .run(check_alembic);
@@ -94,7 +94,9 @@ fn check_alembic(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome
         ));
     }
     emit("venv present");
-    Ok(RunOutcome::Ran("alembic available".into()))
+    let venv = super::python::venv_python(&ctx.cwd);
+    let venv_str = venv.to_string_lossy().into_owned();
+    spawn_cmd(&venv_str, &["-m", "alembic", "--version"], &ctx.cwd, emit)
 }
 
 fn alembic_upgrade(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {

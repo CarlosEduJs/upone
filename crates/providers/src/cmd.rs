@@ -122,6 +122,10 @@ pub fn python_install_task(cwd: &Path) -> Option<&'static str> {
 /// `mariadb`/`mongo` service in docker-compose, or a sqlite `DATABASE_URL`.
 /// Returns `None` when the DB is external (no provider task exists — the
 /// migration will simply try against it).
+///
+/// Mirrors [`python_install_task`] / [`js_install_task`]: walks up from `cwd`
+/// to the filesystem root, so a nested package picks up the DB defined by a
+/// compose file or `.env` at the workspace root.
 pub fn migration_db_dep(cwd: &Path) -> Option<&'static str> {
     let compose = [
         "docker-compose.yml",
@@ -129,21 +133,22 @@ pub fn migration_db_dep(cwd: &Path) -> Option<&'static str> {
         "compose.yml",
         "compose.yaml",
     ];
-    if files_contain(cwd, &compose, &["postgres", "postgresql"]) {
-        return Some("postgres-up");
-    }
-    if files_contain(cwd, &compose, &["mysql", "mariadb"]) {
-        return Some("mysql-up");
-    }
-    if files_contain(cwd, &compose, &["mongo", "mongodb"]) {
-        return Some("mongo-up");
-    }
-    if files_contain(
-        cwd,
-        &[".env", ".env.local"],
-        &["sqlite://", "DATABASE_URL=sqlite"],
-    ) {
-        return Some("sqlite-ensure");
+    let envs = [".env", ".env.local"];
+    let mut dir = Some(cwd);
+    while let Some(d) = dir {
+        if files_contain(d, &compose, &["postgres", "postgresql"]) {
+            return Some("postgres-up");
+        }
+        if files_contain(d, &compose, &["mysql", "mariadb"]) {
+            return Some("mysql-up");
+        }
+        if files_contain(d, &compose, &["mongo", "mongodb"]) {
+            return Some("mongo-up");
+        }
+        if files_contain(d, &envs, &["sqlite://", "DATABASE_URL=sqlite"]) {
+            return Some("sqlite-ensure");
+        }
+        dir = d.parent();
     }
     None
 }
@@ -210,6 +215,29 @@ pub fn node_modules_present(cwd: &Path) -> bool {
     let mut dir = Some(cwd);
     while let Some(d) = dir {
         if d.join("node_modules").is_dir() {
+            return true;
+        }
+        dir = d.parent();
+    }
+    false
+}
+
+/// Returns true when a bare install task id exists for the project, i.e. the
+/// project is managed by a detected JS package manager (a lockfile exists at or
+/// above `cwd`). Providers use this to guarantee their tasks can depend on the
+/// install task instead of running against a project with no recorded deps.
+pub fn js_managed(cwd: &Path) -> bool {
+    js_install_task(cwd).is_some()
+}
+
+/// Returns true when a CLI that ships on `node_modules/.bin/<bin>` is present at
+/// or above `cwd` (mirroring hoisted workspaces). Lets migration providers
+/// require a *local* CLI rather than printing an npx registry prompt.
+pub fn local_cli(cwd: &Path, bin: &str) -> bool {
+    let mut dir = Some(cwd);
+    while let Some(d) = dir {
+        let candidate = d.join("node_modules").join(".bin").join(bin);
+        if candidate.is_file() || candidate.is_symlink() {
             return true;
         }
         dir = d.parent();
