@@ -23,7 +23,10 @@ pub fn no_project(ctx: &upone_core::Context) {
 pub fn preview(detections: &Detected, plan: &Plan) {
     println!();
     for d in &detections.found {
-        println!("  {} Detected {} ({})", CHECK, d.provider, d.signature);
+        println!(
+            "  {} Detected {} ({}) — {}",
+            CHECK, d.provider, d.signature, d.reason
+        );
     }
     println!("  {CHECK} Plan created");
     println!();

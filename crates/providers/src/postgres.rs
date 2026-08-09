@@ -32,7 +32,8 @@ impl Provider for Postgres {
     }
 
     fn signatures(&self) -> &'static [&'static str] {
-        &["postgresql.conf", ".env"]
+        // Detected by content (docker-compose/DATABASE_URL), not by file signatures.
+        &[]
     }
 
     fn detect(&self, cwd: &Path) -> Option<upone_core::Detection> {

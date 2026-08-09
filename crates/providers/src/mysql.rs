@@ -45,7 +45,8 @@ impl Provider for Mysql {
     }
 
     fn signatures(&self) -> &'static [&'static str] {
-        &["my.cnf", "mysql.conf"]
+        // Detected by content (docker-compose/DATABASE_URL), not by file signatures.
+        &[]
     }
 
     fn detect(&self, cwd: &Path) -> Option<upone_core::Detection> {

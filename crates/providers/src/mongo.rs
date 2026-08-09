@@ -42,7 +42,8 @@ impl Provider for Mongo {
     }
 
     fn signatures(&self) -> &'static [&'static str] {
-        &["mongod.conf"]
+        // Detected by content (docker-compose/env URI), not by file signatures.
+        &[]
     }
 
     fn detect(&self, cwd: &Path) -> Option<upone_core::Detection> {

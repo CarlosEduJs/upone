@@ -16,10 +16,6 @@ examples/**/Cargo.lock
 # Build outputs
 dist
 build
-*.tsbuildinfo
-
-# Generated files
-apps/web/src/routeTree.gen.ts
 
 # IDEs and editors
 .vscode/*
@@ -42,14 +38,6 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
-
-# Turbo
-.turbo
-.nx
-
-# Better-T-Stack
-.alchemy
-.vercel
 
 # Testing
 coverage

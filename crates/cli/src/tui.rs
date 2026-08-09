@@ -152,7 +152,7 @@ fn apply_event(state: &mut HashMap<String, TaskUi>, ev: CoreEvent) {
             let ui = match &step.status {
                 StepStatus::Done(_) => TaskUi::Done,
                 StepStatus::Error(_) => TaskUi::Failed,
-                _ => TaskUi::Pending,
+                StepStatus::Running => TaskUi::Pending,
             };
             state.insert(step.task_id, ui);
         }

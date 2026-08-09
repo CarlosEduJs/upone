@@ -26,7 +26,6 @@ pub struct Step {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepStatus {
-    Planned,
     Running,
     Done(RunOutcome),
     Error(String),

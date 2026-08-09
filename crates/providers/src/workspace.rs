@@ -25,12 +25,6 @@ pub fn package_dirs(root: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-/// Returns true when `root` declares any workspace layout.
-#[must_use]
-pub fn is_workspace(root: &Path) -> bool {
-    !package_dirs(root).is_empty()
-}
-
 /// Turns a relative package path into an injective task-id namespace.
 ///
 /// Components are joined with `_` and any `_` inside a component is doubled,
