@@ -460,3 +460,133 @@ fn collect_readiness_checks_package_scoped() {
     assert!(checks.iter().any(|c| c.id.starts_with("packages_db-")));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn detects_typeorm() {
+    let dir = in_dir(
+        "typeorm",
+        &[("package.json", r#"{"dependencies":{"typeorm":"^0.3.0"}}"#)],
+    );
+    assert!(ids(&dir).contains(&"typeorm".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // data-source file alone matches.
+    let dir = in_dir(
+        "typeorm-ds",
+        &[
+            (
+                "data-source.ts",
+                "export default new DataSource({ type: 'postgres' })",
+            ),
+            ("package.json", "{}"),
+        ],
+    );
+    assert!(ids(&dir).contains(&"typeorm".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_sequelize() {
+    let dir = in_dir(
+        "sequelize",
+        &[
+            ("package.json", r#"{"dependencies":{"sequelize":"^6.0.0"}}"#),
+            ("package-lock.json", "{}"),
+        ],
+    );
+    assert!(ids(&dir).contains(&"sequelize".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // sequelize-cli layout alone matches, when the project is managed.
+    let dir = in_dir(
+        "sequelize-layout",
+        &[
+            ("config/config.json", "{\"development\":{}}"),
+            ("migrations/1-init.js", "module.exports.up = () => {};"),
+            ("package-lock.json", "{}"),
+        ],
+    );
+    assert!(ids(&dir).contains(&"sequelize".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_knex() {
+    let dir = in_dir(
+        "knex",
+        &[
+            ("package.json", r#"{"dependencies":{"knex":"^3.0.0"}}"#),
+            ("package-lock.json", "{}"),
+        ],
+    );
+    assert!(ids(&dir).contains(&"knex".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // knexfile alone matches.
+    let dir = in_dir("knex-file", &[("knexfile.js", "module.exports = {};")]);
+    assert!(ids(&dir).contains(&"knex".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_ef_core() {
+    let dir = in_dir(
+        "ef",
+        &[(
+            "App.csproj",
+            r#"<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
+  </ItemGroup>
+</Project>"#,
+        )],
+    );
+    assert!(ids(&dir).contains(&"ef-core".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // A plain csproj without EF must not match.
+    let dir = in_dir(
+        "no-ef",
+        &[(
+            "App.csproj",
+            r#"<Project Sdk="Microsoft.NET.Sdk.Web"></Project>"#,
+        )],
+    );
+    assert!(!ids(&dir).contains(&"ef-core".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_alembic() {
+    let dir = in_dir(
+        "alembic",
+        &[("alembic.ini", "[alembic]\nscript_location = alembic\n")],
+    );
+    assert!(ids(&dir).contains(&"alembic".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_gorm_and_sqlalchemy() {
+    let dir = in_dir(
+        "gorm",
+        &[(
+            "go.mod",
+            "module hello\n\ngo 1.24\n\nrequire (\n\tgorm.io/gorm v1.25.0\n)\n",
+        )],
+    );
+    assert!(ids(&dir).contains(&"gorm".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir("sqlalchemy", &[("requirements.txt", "sqlalchemy==2.0.0\n")]);
+    assert!(ids(&dir).contains(&"sqlalchemy".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // A manifest without the ORM must not match.
+    let dir = in_dir(
+        "no-sqlalchemy",
+        &[("requirements.txt", "requests==2.0.0\n")],
+    );
+    assert!(!ids(&dir).contains(&"sqlalchemy".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}

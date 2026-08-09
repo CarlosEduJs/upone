@@ -2,6 +2,7 @@
 
 use serde_json as _;
 
+pub mod alembic;
 pub mod better_auth;
 pub mod biome;
 pub mod bun;
@@ -9,8 +10,11 @@ pub mod cargo;
 mod cmd;
 pub mod docker;
 pub mod drizzle;
+pub mod ef_core;
 pub mod go;
+pub mod gorm;
 mod js;
+pub mod knex;
 pub mod mongo;
 pub mod mongoose;
 pub mod mysql;
@@ -25,10 +29,13 @@ pub mod prisma;
 pub mod python;
 pub mod redis;
 pub mod ruby;
+pub mod sequelize;
 pub mod shadcn;
+pub mod sqlalchemy;
 pub mod sqlite;
 pub mod trpc;
 pub mod turbo;
+pub mod typeorm;
 pub mod uv;
 pub mod workspace;
 pub mod yarn;
@@ -50,6 +57,13 @@ pub fn build_registry() -> Registry {
     reg.register(Box::new(docker::Docker));
     reg.register(Box::new(prisma::Prisma));
     reg.register(Box::new(drizzle::Drizzle));
+    reg.register(Box::new(typeorm::Typeorm));
+    reg.register(Box::new(sequelize::Sequelize));
+    reg.register(Box::new(knex::Knex));
+    reg.register(Box::new(ef_core::EfCore));
+    reg.register(Box::new(alembic::Alembic));
+    reg.register(Box::new(gorm::Gorm));
+    reg.register(Box::new(sqlalchemy::SqlAlchemy));
     reg.register(Box::new(redis::Redis));
     reg.register(Box::new(postgres::Postgres));
     reg.register(Box::new(mysql::Mysql));

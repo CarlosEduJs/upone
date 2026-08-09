@@ -45,6 +45,13 @@ You stay in control: a preview shows the plan and its risk level before anything
 | **SQLite** | `DATABASE_URL=sqlite` / ORM config (Prisma, Drizzle, Alembic) | Creates the SQLite database file resolved from the env or the ORM config if it does not exist (no server to start) |
 | **Prisma** | `prisma/schema.prisma` | Generates the Prisma client with `npx prisma generate` |
 | **Drizzle** | `drizzle.config.*` | Generates migrations with `npx drizzle-kit generate` |
+| **TypeORM** | `typeorm` dep / `data-source.*` / `ormconfig.*` | Migrates the configured database with `npx typeorm migration:run` |
+| **Sequelize** | `sequelize` dep / sequelize-cli `config/` | Migrates the configured database with `npx sequelize-cli db:migrate` |
+| **Knex** | `knex` dep / `knexfile.*` | Migrates the configured database with `npx knex migrate:latest` |
+| **EF Core (.NET)** | `.csproj` referencing `Microsoft.EntityFrameworkCore` | Restores packages/tools and applies migrations with `dotnet ef database update` |
+| **Alembic** | `alembic.ini` | Applies migrations with `python -m alembic upgrade head` inside the project venv |
+| **GORM** | `gorm.io/gorm` dep in `go.mod` | Recognizes the ORM (informational) |
+| **SQLAlchemy** | `sqlalchemy` dep in a Python manifest | Recognizes the ORM (informational; migrations are Alembic's job) |
 | **Turborepo** | `turbo.json` | Recognizes the workspace (informational) |
 | **Biome** | `biome.json` / `biome.jsonc` | Recognizes the project (informational) |
 | **shadcn/ui** | `components.json` | Recognizes the project (informational) |
