@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.0
+
+- Tighten the planner: reject duplicate task ids, missing dependencies and dependency cycles with clear errors, stamp every task with its working directory, support topological builds that ignore external tasks, and surface only real failures in the run report
 ## 0.3.0
 
 - Add minimal environment readiness validation layer abstractions (ReadinessCheck, ReadinessStatus, ReadinessReport, sweep), .env* key resolver, and .env.example parser. Extend Provider trait with readiness_checks.
