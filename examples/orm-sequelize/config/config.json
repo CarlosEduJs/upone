@@ -4,6 +4,7 @@
     "password": "upone",
     "database": "upone",
     "host": "127.0.0.1",
+    "port": 25432,
     "dialect": "postgres"
   }
 }

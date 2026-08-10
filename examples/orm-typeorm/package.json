@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts"
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d data-source.ts"
   },
   "dependencies": {
     "typeorm": "^0.3.20",
