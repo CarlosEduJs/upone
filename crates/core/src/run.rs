@@ -26,7 +26,6 @@ pub struct Step {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepStatus {
-    Planned,
     Running,
     Done(RunOutcome),
     Error(String),
@@ -57,6 +56,62 @@ impl Report {
             .iter()
             .filter(|s| matches!(s.status, StepStatus::Error(_)))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn step(id: &str, status: StepStatus) -> Step {
+        Step {
+            task_id: id.to_string(),
+            label: id.to_string(),
+            description: String::new(),
+            risk: Risk::Low,
+            status,
+            detail: None,
+        }
+    }
+
+    #[test]
+    fn errors_filters_error_steps() {
+        let mut report = Report::new();
+        report
+            .steps
+            .push(step("ok", StepStatus::Done(RunOutcome::Ran("ok".into()))));
+        report.steps.push(step("running", StepStatus::Running));
+        report
+            .steps
+            .push(step("boom", StepStatus::Error("bad".to_string())));
+
+        let errors = report.errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].task_id, "boom");
+        assert!(report.has_error());
+    }
+
+    #[test]
+    fn errors_empty_when_nothing_failed() {
+        let mut report = Report::new();
+        report.steps.push(step(
+            "ok",
+            StepStatus::Done(RunOutcome::Skipped("ok".into())),
+        ));
+        assert!(report.errors().is_empty());
+        assert!(!report.has_error());
+    }
+
+    #[test]
+    fn error_detail_is_preserved() {
+        let mut report = Report::new();
+        report
+            .steps
+            .push(step("boom", StepStatus::Error("bad".to_string())));
+        assert_eq!(
+            report.errors()[0].status,
+            StepStatus::Error("bad".to_string())
+        );
     }
 }
 
@@ -91,6 +146,9 @@ impl<'a> Engine<'a> {
     }
 
     fn run_level(&mut self, level: &[TaskId], report: &mut Report) {
+        // One Step per task: the first pass pushes it as "running" so the
+        // report reflects it immediately, and the join pass replaces that
+        // same entry with the final status (preserving risk/description).
         let mut entries = Vec::new();
         for id in level {
             if let Some(task) = self.plan.task(id) {
@@ -102,15 +160,21 @@ impl<'a> Engine<'a> {
                     status: StepStatus::Running,
                     detail: None,
                 };
-                report.steps.push(step.clone());
+                report.steps.push(step);
+                let step_idx = report.steps.len() - 1;
                 (self.on_event)(Event::StepStarting(task.id.clone(), task.label.clone()));
 
                 let ctx = self.ctx.clone();
                 let run = task.run.clone();
                 let cwd = task.cwd.clone();
+                let description = task.description.clone();
+                let risk = task.risk;
                 entries.push((
+                    step_idx,
                     task.id.clone(),
                     task.label.clone(),
+                    description,
+                    risk,
                     std::thread::spawn(move || {
                         let mut emitted: Vec<String> = Vec::new();
                         let mut emit = |line: &str| emitted.push(line.to_string());
@@ -125,38 +189,31 @@ impl<'a> Engine<'a> {
             }
         }
 
-        for (id, label, handle) in entries {
-            let Ok((outcome, emitted)) = handle.join() else {
-                let step = Step {
-                    task_id: id,
-                    label,
-                    description: String::new(),
-                    risk: Risk::Low,
-                    status: StepStatus::Error("task thread panicked".to_string()),
-                    detail: None,
-                };
-                report.steps.push(step.clone());
-                (self.on_event)(Event::StepDone(step));
-                continue;
-            };
-            let detail = if emitted.is_empty() {
-                None
-            } else {
-                Some(emitted.join("\n"))
-            };
-            let status = match outcome {
-                Ok(outcome) => StepStatus::Done(outcome),
-                Err(e) => StepStatus::Error(e.to_string()),
+        for (step_idx, id, label, description, risk, handle) in entries {
+            let (status, detail) = match handle.join() {
+                Ok((outcome, emitted)) => {
+                    let detail = if emitted.is_empty() {
+                        None
+                    } else {
+                        Some(emitted.join("\n"))
+                    };
+                    let status = match outcome {
+                        Ok(outcome) => StepStatus::Done(outcome),
+                        Err(e) => StepStatus::Error(e.to_string()),
+                    };
+                    (status, detail)
+                }
+                Err(_) => (StepStatus::Error("task thread panicked".to_string()), None),
             };
             let step = Step {
                 task_id: id,
                 label,
-                description: String::new(),
-                risk: Risk::Low,
+                description,
+                risk,
                 status,
                 detail,
             };
-            report.steps.push(step.clone());
+            report.steps[step_idx] = step.clone();
             (self.on_event)(Event::StepDone(step));
         }
     }

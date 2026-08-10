@@ -173,13 +173,16 @@ pub fn sweep(ctx: &Context, checks: &[ReadinessCheck]) -> ReadinessReport {
 
 const DOTENV_FILES: &[&str] = &[".env.local", ".env.development", ".env"];
 
-/// Resolves an environment variable by checking:
+/// Resolves an environment variable by checking, in order:
 /// 1. Process environment (`std::env::var`)
 /// 2. `.env.local`
 /// 3. `.env.development`
 /// 4. `.env`
 ///
-/// Returns the value if found in any layer, `None` otherwise.
+/// The first hit wins (deliberate: `.env.local` overrides the committed
+/// `.env` base — the environment-specific value is the one that applies, so
+/// a local override beats a stale base value). Returns the value if found in
+/// any layer, `None` otherwise.
 #[must_use]
 pub fn resolve_env_key(cwd: &Path, key: &str) -> Option<String> {
     if let Ok(val) = std::env::var(key) {

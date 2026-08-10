@@ -308,10 +308,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("upone-sqlite-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::testkit::temp_dir("sqlite", name)
     }
 
     fn with_env(dir: &Path, value: &str) {

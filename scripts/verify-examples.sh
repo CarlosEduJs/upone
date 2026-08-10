@@ -107,6 +107,9 @@ rust-hello)     check_dry_run "$dir" "check cargo installed" "cargo build" ;;
     alembic-hello)  check_dry_run "$dir" "check python installed" "create project venv" "alembic upgrade head" ;;
     gorm-hello)     check_dry_run "$dir" "check go installed" "go build ./..." "Detected gorm" ;;
     sqlalchemy-hello) check_dry_run "$dir" "Detected sqlalchemy" ;;
+    # dotnet-ef / alembic / gorm / sqlalchemy are dry-run-only: their fixtures
+    # have no local database service (compose) to migrate against, so an exec
+    # pass would just fail at the connection step. They stay in dry-run.
     monorepo-pnpm)  check_dry_run "$dir" "check pnpm installed" "pnpm install" ;;
     monorepo-bun)   check_dry_run "$dir" "check bun installed" "bun install" "check drizzle-kit available" "drizzle-kit generate" "check postgres is running" ;;
     *) echo "WARN [$name]: unknown example, skipping"; echo ;;
@@ -136,16 +139,18 @@ rust-hello)     check_dry_run "$dir" "check cargo installed" "cargo build" ;;
             rm -rf "$dir/vendor" && rm -f "$dir/composer.lock" ;;
         esac
         ;;
-      stack-docker|stack-mysql|stack-mongo|orm-drizzle|mongoose)
+      stack-docker|stack-mysql|stack-mongo|orm-drizzle|orm-knex|orm-sequelize|orm-typeorm|mongoose)
         if docker_reachable; then
           check_exec "$dir"
           case "$name" in
-            mongoose)
-              # Remove what `npm install` wrote so the fixture stays clean.
+            mongoose|orm-knex|orm-sequelize|orm-typeorm|orm-drizzle)
+              # Remove what `npm install` / `pnpm install` wrote so the
+              # fixture stays clean.
               rm -rf "$dir/node_modules" ;;
           esac
           # Tear the example down so a later docker example can bind the same
-          # host ports without colliding (both fixtures publish localhost:5432).
+          # host ports without colliding (stack-mongo and mongoose both publish
+          # mongo's 27017; the postgres fixtures use dedicated host ports).
           (cd "$dir" && docker compose down -v >/dev/null 2>&1) || true
         else
           skipped=1

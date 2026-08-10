@@ -1,10 +1,14 @@
 //! Shared helpers to run commands safely and explainably.
 
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
-use upone_core::plan::RunOutcome;
+use upone_core::plan::{Planner, RunOutcome, Task};
+use upone_core::readiness::{resolve_env_key, Importance, ReadinessCheck, ReadinessStatus};
 use upone_core::run::RunError;
+use upone_core::Context;
 
 /// Runs a command with the given args in `cwd`, streaming output to `emit`.
 pub fn spawn_cmd(
@@ -158,7 +162,9 @@ pub fn migration_db_dep(cwd: &Path) -> Option<&'static str> {
 /// Matches port mappings like `- "15432:5432"` / `- 15432:5432` where the
 /// *container* side equals `container_port` and returns the *host* side, so
 /// providers can verify the real published port instead of assuming 5432/6379.
-/// Falls back to `container_port` when nothing is configured or parseable.
+/// Handles IP-bound mappings (`- "127.0.0.1:15432:5432"`) by taking the
+/// host-port segment. Falls back to `container_port` when nothing is
+/// configured or parseable.
 pub fn compose_host_port(cwd: &Path, files: &[&str], container_port: u16) -> u16 {
     let needle = format!(":{container_port}");
     for file in files {
@@ -169,9 +175,13 @@ pub fn compose_host_port(cwd: &Path, files: &[&str], container_port: u16) -> u16
             let Some(pos) = line.find(&needle) else {
                 continue;
             };
+            // Everything before the colon is either just the host port
+            // (`15432`) or an IP-bound form (`127.0.0.1:15432`); the segment
+            // right before the container port is the host port in both.
             let mut host = line[..pos].trim();
             host = host.trim_matches(['"', '\'', '-', ' ', ':', '[', ']', '+']);
-            if let Ok(port) = host.parse::<u16>() {
+            let host_port = host.rsplit(':').next().unwrap_or(host);
+            if let Ok(port) = host_port.trim().parse::<u16>() {
                 return port;
             }
         }
@@ -245,6 +255,196 @@ pub fn local_cli(cwd: &Path, bin: &str) -> bool {
     false
 }
 
+/// Reports whether `host:port` accepts a TCP connection.
+///
+/// Resolves the host through the system resolver (so it handles `localhost`,
+/// IP literals and hostnames alike) and tries each address with a 300ms
+/// timeout. Shared by the postgres/redis/mysql/mongo providers.
+#[must_use]
+pub fn tcp_reachable(host: &str, port: u16) -> bool {
+    format!("{host}:{port}")
+        .to_socket_addrs()
+        .is_ok_and(|mut addrs| {
+            addrs
+                .find_map(|addr| TcpStream::connect_timeout(&addr, Duration::from_millis(300)).ok())
+                .is_some()
+        })
+}
+
+/// Parses the `host[:port]` authority of a `<scheme>://` connection URL.
+///
+/// Accepts any of `schemes`, drops credentials (`user@`), a path and a query
+/// string, and defaults the port when absent. Returns `None` when the URL uses
+/// none of the schemes or has no usable authority (e.g. a unix socket).
+/// Shared by the mysql and mongo providers.
+#[must_use]
+pub fn parse_uri_authority(
+    url: &str,
+    schemes: &[&str],
+    default_port: u16,
+) -> Option<(String, u16)> {
+    let url = url.split_once('?').map_or(url, |(u, _)| u);
+    let authority = schemes
+        .iter()
+        .find_map(|s| url.strip_prefix(&format!("{s}://")))?
+        .split('/')
+        .next()?
+        .rsplit('@')
+        .next()?;
+    if authority.is_empty() || authority.starts_with('/') {
+        return None;
+    }
+    match authority.rsplit_once(':') {
+        Some((host, port)) if !host.is_empty() && port.parse::<u16>().is_ok() => {
+            Some((host.to_string(), port.parse::<u16>().ok()?))
+        }
+        _ => Some((authority.to_string(), default_port)),
+    }
+}
+
+/// Shared "binary on PATH" check with an install hint on failure.
+///
+/// # Errors
+///
+/// Fails with a `RunError::Failed` when `bin` is not on PATH.
+pub fn check_binary(
+    bin: &str,
+    hint: &str,
+    emit: &mut dyn FnMut(&str),
+) -> Result<RunOutcome, RunError> {
+    if which(bin) {
+        emit(&format!("{bin} found on PATH"));
+        Ok(RunOutcome::Ran(format!("{bin} available")))
+    } else {
+        Err(RunError::Failed(format!("{bin} not found on PATH. {hint}")))
+    }
+}
+
+/// Like [`check_binary`] but probes with an explicit argument, for tools that
+/// reject `--version` (e.g. Go: the valid probe is `go version`).
+///
+/// # Errors
+///
+/// Fails with a `RunError::Failed` when `bin` is not on PATH.
+pub fn check_binary_probe(
+    bin: &str,
+    probe: &str,
+    hint: &str,
+    emit: &mut dyn FnMut(&str),
+) -> Result<RunOutcome, RunError> {
+    if which_probe(bin, probe) {
+        emit(&format!("{bin} found on PATH"));
+        Ok(RunOutcome::Ran(format!("{bin} available")))
+    } else {
+        Err(RunError::Failed(format!("{bin} not found on PATH. {hint}")))
+    }
+}
+
+/// Builds a readiness check asserting that a `node_modules` directory exists at
+/// or above `cwd`. Shared by the yarn/drizzle/knex/sequelize providers, whose
+/// only differences are the task id, display name and install remedy.
+#[must_use]
+pub fn node_modules_check(id: &str, tool: &str, remedy: &str, cwd: &Path) -> ReadinessCheck {
+    let cwd = cwd.to_path_buf();
+    let id = id.to_string();
+    let tool = tool.to_string();
+    let remedy = remedy.to_string();
+    ReadinessCheck::new(
+        id,
+        format!("{tool} dependencies installed"),
+        format!("node_modules present for {tool}"),
+        Importance::Required,
+        move |_ctx| {
+            if node_modules_present(&cwd) {
+                ReadinessStatus::Ready("node_modules present".into())
+            } else {
+                ReadinessStatus::NotReady {
+                    reason: format!("node_modules missing for {tool}"),
+                    remedy: remedy.clone(),
+                }
+            }
+        },
+    )
+}
+
+/// Builds a readiness check asserting that an environment key is set.
+/// Shared by the postgres/mysql/better-auth providers, whose only differences
+/// are the task id and the key name.
+#[must_use]
+pub fn env_key_check(id: &str, key: &str, cwd: &Path) -> ReadinessCheck {
+    let cwd = cwd.to_path_buf();
+    let id = id.to_string();
+    let key = key.to_string();
+    ReadinessCheck::new(
+        id,
+        key.clone(),
+        format!("{key} environment variable is set"),
+        Importance::Required,
+        move |_ctx| {
+            if resolve_env_key(&cwd, &key).is_some() {
+                ReadinessStatus::Ready("found".into())
+            } else {
+                ReadinessStatus::NotReady {
+                    reason: format!("{key} not found in process env or .env* files"),
+                    remedy: format!("Add {key} to your .env.local or shell environment"),
+                }
+            }
+        },
+    )
+}
+
+/// Which install task a provider's plan should depend on.
+#[derive(Clone, Copy)]
+pub enum InstallKind {
+    Js,
+    Python,
+}
+
+/// Whether an ORM/db provider's action task should be wired to depend on the
+/// database task detected in the project (e.g. `postgres-up`), resolved by
+/// [`add_migration_plan`] from the project files.
+#[derive(Clone, Copy)]
+pub enum DbWiring {
+    /// The action only needs the install task (client generation, etc.).
+    None,
+    /// Also wire the detected database task (if any) into the action's deps.
+    Database,
+}
+
+/// Registers a `check` + `action` (migrate/generate) pair for the ORM/db
+/// providers, wiring the install and database dependencies that are only known
+/// after detection. Providers pass fully-built tasks and the helper wires
+/// them in; `install` resolves the install task id for the project, and
+/// `db_wiring` (when [`DbWiring::Database`]) adds the detected DB task as an
+/// action dependency.
+pub fn add_migration_plan(
+    planner: &mut Planner<'_>,
+    ctx: &Context,
+    check: Task,
+    action: Task,
+    install: InstallKind,
+    db_wiring: DbWiring,
+) {
+    let check_id = check.id.clone();
+    let mut action_deps = vec![check_id];
+    let mut check = check;
+    let install = match install {
+        InstallKind::Js => js_install_task(&ctx.cwd),
+        InstallKind::Python => python_install_task(&ctx.cwd),
+    };
+    if let Some(install) = install {
+        action_deps.push(install.to_string());
+        check = check.depends_on([install]);
+    }
+    if matches!(db_wiring, DbWiring::Database) {
+        if let Some(db) = migration_db_dep(&ctx.cwd) {
+            action_deps.push(db.to_string());
+        }
+    }
+    planner.add(check);
+    planner.add(action.depends_on(action_deps));
+}
+
 /// Resolves the JS install task id detected in the project (if any).
 /// Used by providers that depend on `node_modules` (prisma, drizzle).
 ///
@@ -273,13 +473,9 @@ pub fn js_install_task(cwd: &Path) -> Option<&'static str> {
 mod tests {
     use super::*;
     use std::fs;
-    use std::path::PathBuf;
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("upone-cmd-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        crate::testkit::temp_dir("cmd", name)
     }
 
     #[test]
@@ -331,6 +527,22 @@ mod tests {
         let dir = temp_dir("yarn");
         fs::write(dir.join("yarn.lock"), "# autogenerated").unwrap();
         assert_eq!(js_install_task(&dir), Some("yarn-install"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compose_host_port_handles_plain_and_ip_bound() {
+        let dir = temp_dir("ports");
+        fs::write(
+            dir.join("compose.yml"),
+            "services:\n  db:\n    ports:\n      - \"127.0.0.1:15432:5432\"\n",
+        )
+        .unwrap();
+        let files = ["compose.yml", "docker-compose.yml"];
+        // IP-bound: the host port published on the interface wins over 5432.
+        assert_eq!(compose_host_port(&dir, &files, 5432), 15432);
+        // Nothing matching that container port -> fallback unchanged.
+        assert_eq!(compose_host_port(&dir, &files, 6379), 6379);
         let _ = fs::remove_dir_all(&dir);
     }
 }

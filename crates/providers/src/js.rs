@@ -4,7 +4,7 @@ use upone_core::plan::{Planner, RunOutcome, Task};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{spawn_cmd, which};
+use crate::cmd::{check_binary, spawn_cmd};
 
 /// Metadata for a JS package manager.
 pub struct JsPm {
@@ -23,15 +23,11 @@ fn check(
     _ctx: &Context,
     emit: &mut dyn FnMut(&str),
 ) -> Result<RunOutcome, RunError> {
-    if which(pm.bin) {
-        emit(&format!("{} found on PATH", pm.bin));
-        Ok(RunOutcome::Ran(format!("{} installed", pm.bin)))
-    } else {
-        Err(RunError::Failed(format!(
-            "{} not found on PATH. Install it via https://nodejs.org or your system's installer.",
-            pm.bin
-        )))
-    }
+    check_binary(
+        pm.bin,
+        "Install it via https://nodejs.org or your system's installer.",
+        emit,
+    )
 }
 
 fn install(

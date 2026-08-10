@@ -8,13 +8,13 @@ use std::path::Path;
 
 use upone_core::detect::Provider;
 use upone_core::plan::{Planner, RunOutcome, Task};
-use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
+use upone_core::readiness::ReadinessCheck;
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
 use crate::cmd::{
-    js_install_task, js_managed, local_cli, migration_db_dep, node_modules_present,
-    package_has_dependency, spawn_cmd, which,
+    add_migration_plan, js_managed, local_cli, node_modules_present, package_has_dependency,
+    spawn_cmd, which, DbWiring, InstallKind,
 };
 
 const KNEXFILES: &[&str] = &["knexfile.ts", "knexfile.js", "knexfile.mts", "knexfile.cts"];
@@ -51,7 +51,7 @@ impl Provider for Knex {
     }
 
     fn plan(&self, ctx: &Context, planner: &mut Planner<'_>) {
-        let mut check = Task::new(
+        let check = Task::new(
             "knex-check",
             "check knex available",
             "checks that the local knex binary is installed",
@@ -59,44 +59,30 @@ impl Provider for Knex {
         .risk(Risk::Low)
         .run(check_knex);
 
-        let mut migrate = Task::new(
+        let migrate = Task::new(
             "knex-migrate",
             "knex migrate:latest",
             "applies pending knex migrations to the configured database (safe to repeat)",
         )
         .risk(Risk::High)
-        .depends_on(["knex-check"])
         .run(knex_migrate);
 
-        if let Some(install) = js_install_task(&ctx.cwd) {
-            check = check.depends_on([install]);
-            migrate = migrate.depends_on(["knex-check", install]);
-        }
-        if let Some(db) = migration_db_dep(&ctx.cwd) {
-            migrate = migrate.depends_on(["knex-check", db]);
-        }
-
-        planner.add(check);
-        planner.add(migrate);
+        add_migration_plan(
+            planner,
+            ctx,
+            check,
+            migrate,
+            InstallKind::Js,
+            DbWiring::Database,
+        );
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<ReadinessCheck> {
-        let cwd = ctx.cwd.clone();
-        vec![ReadinessCheck::new(
+        vec![crate::cmd::node_modules_check(
             "knex-deps",
-            "knex dependencies installed",
-            "node_modules present for knex",
-            Importance::Required,
-            move |_ctx| {
-                if node_modules_present(&cwd) {
-                    ReadinessStatus::Ready("node_modules present".into())
-                } else {
-                    ReadinessStatus::NotReady {
-                        reason: "node_modules missing for knex".into(),
-                        remedy: "Run your package manager's install or 'upone up'".into(),
-                    }
-                }
-            },
+            "knex",
+            "Run your package manager's install or 'upone up'",
+            &ctx.cwd,
         )]
     }
 }

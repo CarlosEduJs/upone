@@ -22,6 +22,12 @@ You stay in control: a preview shows the plan and its risk level before anything
 
 `upone ready` is the read-only counterpart to `upone up`: it detects the same technologies, runs the readiness checks against your current state (without altering anything), and prints the same report. It exits non-zero when any required check is not ready, so it slots into scripts.
 
+Exit codes: `upone up` exits non-zero only when a *task fails*, so reverting your
+machine to "ready" state must actually succeed. The readiness sweep that runs
+after `upone up` is informational — a not-ready environment does not make `up`
+fail, since setup may intentionally need a follow-up action (e.g. setting env
+vars). Use `upone ready` when you need a strict pass/fail gate.
+
 ## What it supports today
 
 Providers are grouped by category. A project can use several of them at once —

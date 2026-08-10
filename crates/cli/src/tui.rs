@@ -50,8 +50,12 @@ pub fn run(
     yes: bool,
     start_engine: impl FnOnce() -> anyhow::Result<Report> + Send + 'static,
 ) -> anyhow::Result<Report> {
+    let mut tasks: Vec<Task> = plan.tasks().cloned().collect();
+    // `Plan` stores tasks in a HashMap; sort by id so the drawn list is
+    // stable across runs (execution order itself is deterministic via levels).
+    tasks.sort_by(|a, b| a.id.cmp(&b.id));
     let mut app = App {
-        tasks: plan.tasks().cloned().collect(),
+        tasks,
         state: HashMap::new(),
         confirmed: yes,
         finished: false,
@@ -152,7 +156,7 @@ fn apply_event(state: &mut HashMap<String, TaskUi>, ev: CoreEvent) {
             let ui = match &step.status {
                 StepStatus::Done(_) => TaskUi::Done,
                 StepStatus::Error(_) => TaskUi::Failed,
-                _ => TaskUi::Pending,
+                StepStatus::Running => TaskUi::Pending,
             };
             state.insert(step.task_id, ui);
         }

@@ -40,6 +40,9 @@ pub mod uv;
 pub mod workspace;
 pub mod yarn;
 
+#[cfg(test)]
+pub(crate) mod testkit;
+
 use std::collections::HashSet;
 
 use upone_core::detect::Registry;

@@ -6,11 +6,11 @@
 
 use upone_core::detect::Provider;
 use upone_core::plan::{Planner, RunOutcome, Task};
-use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
+use upone_core::readiness::ReadinessCheck;
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{any_exists, spawn_cmd, which};
+use crate::cmd::{any_exists, check_binary, spawn_cmd};
 
 pub struct Yarn;
 
@@ -38,7 +38,13 @@ impl Provider for Yarn {
             "checks that yarn is on PATH",
         )
         .risk(Risk::Low)
-        .run(check_yarn);
+        .run(|_ctx, emit| {
+            check_binary(
+                "yarn",
+                "Install it via `npm install -g yarn` or enable it with `corepack enable`.",
+                emit,
+            )
+        });
 
         let install = Task::new(
             "yarn-install",
@@ -54,36 +60,12 @@ impl Provider for Yarn {
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<ReadinessCheck> {
-        use crate::cmd::node_modules_present;
-
-        let cwd = ctx.cwd.clone();
-        vec![ReadinessCheck::new(
+        vec![crate::cmd::node_modules_check(
             "yarn-deps",
-            "yarn dependencies installed",
-            "node_modules present for yarn",
-            Importance::Required,
-            move |_ctx| {
-                if node_modules_present(&cwd) {
-                    ReadinessStatus::Ready("node_modules present".into())
-                } else {
-                    ReadinessStatus::NotReady {
-                        reason: "node_modules missing for yarn".into(),
-                        remedy: "Run 'yarn install' or 'upone up'".into(),
-                    }
-                }
-            },
+            "yarn",
+            "Run 'yarn install' or 'upone up'",
+            &ctx.cwd,
         )]
-    }
-}
-
-fn check_yarn(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    if which("yarn") {
-        emit("yarn found on PATH");
-        Ok(RunOutcome::Ran("yarn installed".into()))
-    } else {
-        Err(RunError::Failed(
-            "yarn not found on PATH. Install it via `npm install -g yarn` or enable it with `corepack enable`.".into(),
-        ))
     }
 }
 

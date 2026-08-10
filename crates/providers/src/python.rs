@@ -2,8 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use upone_core::plan::RunOutcome;
-use upone_core::run::RunError;
+use upone_core::readiness::Importance;
+use upone_core::readiness::{ReadinessCheck, ReadinessStatus};
 
 use crate::cmd::which;
 
@@ -35,6 +35,33 @@ pub fn python_bin() -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// Builds a readiness check asserting that the project venv exists.
+/// Shared by the uv/pip/alembic providers, whose only differences are the
+/// task id, description and install remedy.
+#[must_use]
+pub fn venv_check(id: &str, description: &str, remedy: &str, cwd: &Path) -> ReadinessCheck {
+    let cwd = cwd.to_path_buf();
+    let id = id.to_string();
+    let description = description.to_string();
+    let remedy = remedy.to_string();
+    ReadinessCheck::new(
+        id,
+        "project venv (.venv)",
+        description,
+        Importance::Required,
+        move |_ctx| {
+            if venv_exists(&cwd) {
+                ReadinessStatus::Ready(".venv present".into())
+            } else {
+                ReadinessStatus::NotReady {
+                    reason: ".venv not found".into(),
+                    remedy: remedy.clone(),
+                }
+            }
+        },
+    )
 }
 
 /// True when a requirements manifest exists in `cwd`.
@@ -81,24 +108,6 @@ pub fn requirements_file(cwd: &Path) -> Option<PathBuf> {
     candidates.into_iter().next()
 }
 
-/// Shared binary-on-PATH check with an install hint on failure.
-///
-/// # Errors
-///
-/// Fails with a `RunError::Failed` when `bin` is not on PATH.
-pub fn check_binary(
-    bin: &str,
-    hint: &str,
-    emit: &mut dyn FnMut(&str),
-) -> Result<RunOutcome, RunError> {
-    if which(bin) {
-        emit(&format!("{bin} found on PATH"));
-        Ok(RunOutcome::Ran(format!("{bin} available")))
-    } else {
-        Err(RunError::Failed(format!("{bin} not found on PATH. {hint}")))
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -106,10 +115,7 @@ mod tests {
     use std::fs;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("upone-py-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::testkit::temp_dir("py", name)
     }
 
     #[test]

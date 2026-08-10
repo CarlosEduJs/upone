@@ -7,9 +7,7 @@ use upone_core::detect::Provider;
 use upone_core::plan::{Planner, Task};
 use upone_core::{Context, Detection, Risk};
 
-use crate::cmd::spawn_cmd;
-
-use super::python;
+use crate::cmd::{check_binary, spawn_cmd};
 
 pub struct Poetry;
 
@@ -38,7 +36,7 @@ impl Provider for Poetry {
         )
         .risk(Risk::Low)
         .run(|_ctx, emit| {
-            python::check_binary(
+            check_binary(
                 "poetry",
                 "Install it via https://python-poetry.org/docs/#installation.",
                 emit,

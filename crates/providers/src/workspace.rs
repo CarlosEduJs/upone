@@ -25,12 +25,6 @@ pub fn package_dirs(root: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-/// Returns true when `root` declares any workspace layout.
-#[must_use]
-pub fn is_workspace(root: &Path) -> bool {
-    !package_dirs(root).is_empty()
-}
-
 /// Turns a relative package path into an injective task-id namespace.
 ///
 /// Components are joined with `_` and any `_` inside a component is doubled,
@@ -96,7 +90,16 @@ fn expand_glob(root: &Path, canon_root: &Path, glob: &str, out: &mut Vec<PathBuf
 /// directory itself included, skipping anything that escapes `canon_root`.
 /// Only directories that are real packages (have a package.json) are pushed.
 fn walk_dirs(base: &Path, out: &mut Vec<PathBuf>, canon_root: &Path) {
-    if !base.is_dir() || !inside(base, canon_root) {
+    walk_dirs_inner(base, out, canon_root, 0);
+}
+
+/// Bounds recursion so a symlink loop pointing back inside the root (e.g.
+/// `packages/loop -> .`) cannot recurse forever. `inside()` only rejects
+/// escapes *outward*, so a cycle inside the root needs an explicit depth cap.
+const MAX_DEPTH: usize = 32;
+
+fn walk_dirs_inner(base: &Path, out: &mut Vec<PathBuf>, canon_root: &Path, depth: usize) {
+    if depth > MAX_DEPTH || !base.is_dir() || !inside(base, canon_root) {
         return;
     }
     if base != canon_root {
@@ -106,7 +109,7 @@ fn walk_dirs(base: &Path, out: &mut Vec<PathBuf>, canon_root: &Path) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                walk_dirs(&path, out, canon_root);
+                walk_dirs_inner(&path, out, canon_root, depth + 1);
             }
         }
     }
@@ -227,6 +230,200 @@ fn pnpm_workspaces(root: &Path) -> Option<Vec<String>> {
     }
 }
 
+/// Every directory to run detection on: the project root followed by each
+/// workspace package directory.
+fn all_dirs(root: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![root.to_path_buf()];
+    dirs.extend(package_dirs(root));
+    dirs
+}
+
+/// Relative display path of `dir` under `root`, or `None` when it is the root
+/// itself.
+fn rel_of<'a>(root: &'a Path, dir: &'a Path) -> Option<&'a Path> {
+    dir.strip_prefix(root)
+        .ok()
+        .filter(|rel| !rel.as_os_str().is_empty())
+}
+
+/// Merged result of detecting and planning a project, including every
+/// workspace package.
+pub struct WorkspacePlan {
+    /// Detections across the root and every package, root first, with the
+    /// package location surfaced in each reason.
+    pub detections: upone_core::Detected,
+    /// Per-package detections paired with the context that detected them.
+    pub package_detections: Vec<(upone_core::Context, upone_core::Detection)>,
+    /// Merged plan: per-package task ids namespaced by directory slug, root
+    /// tasks (install, etc.) keeping their canonical ids.
+    pub plan: upone_core::Plan,
+}
+
+impl WorkspacePlan {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.detections.is_empty()
+    }
+}
+
+/// Shared detection over the project root and every workspace package
+/// (monorepos), deduplicating same provider+signature within a single package.
+///
+/// Returns the per-directory detections paired with the context that detected
+/// them (used by the planner and the readiness sweep) plus a merged view for
+/// the UI preview.
+fn detect_workspace_dirs(
+    root: &Path,
+    registry: &upone_core::Registry,
+) -> (
+    Vec<(upone_core::Context, Vec<upone_core::Detection>)>,
+    upone_core::Detected,
+) {
+    use std::collections::HashSet;
+
+    let mut merged = upone_core::Detected::default();
+    let mut per_dir: Vec<(upone_core::Context, Vec<upone_core::Detection>)> = Vec::new();
+    let mut seen: HashSet<(String, String, String)> = HashSet::new();
+
+    for dir in &all_dirs(root) {
+        let rel = rel_of(root, dir);
+        let rel_display = rel.map(|r| r.display().to_string());
+        let dir_ctx = upone_core::Context { cwd: dir.clone() };
+        let dir_detections = upone_core::detect::detect(dir, registry);
+
+        for d in &dir_detections.found {
+            // Distinct packages may report the same provider+signature (e.g.
+            // two packages with drizzle); keep them separate. Within one
+            // package a provider matches at most once, so no further dedup.
+            let key = (
+                rel_display.clone().unwrap_or_default(),
+                d.provider.to_string(),
+                d.signature.clone(),
+            );
+            if !seen.insert(key) {
+                continue;
+            }
+            let reason = rel_display
+                .as_ref()
+                .map_or_else(|| d.reason.clone(), |r| format!("{0} ({r})", d.reason));
+            merged.found.push(upone_core::Detection {
+                provider: d.provider,
+                signature: d.signature.clone(),
+                reason,
+            });
+        }
+
+        per_dir.push((dir_ctx, dir_detections.found));
+    }
+
+    (per_dir, merged)
+}
+
+/// Detects the project at the root and at every workspace package
+/// (monorepos), deduplicating same provider+signature within a package.
+///
+/// Returns the detections for the UI preview and the per-package list used by
+/// the readiness sweep.
+#[must_use]
+pub fn detect_workspace(
+    ctx: &upone_core::Context,
+    registry: &upone_core::Registry,
+) -> (
+    upone_core::Detected,
+    Vec<(upone_core::Context, upone_core::Detection)>,
+) {
+    let (per_dir, detections) = detect_workspace_dirs(&ctx.cwd, registry);
+    let package_detections = per_dir
+        .into_iter()
+        .flat_map(|(dir_ctx, found)| found.into_iter().map(move |d| (dir_ctx.clone(), d)))
+        .collect();
+    (detections, package_detections)
+}
+
+/// Plans every provider with its own working directory, then merges each
+/// per-package plan into one whose task ids are namespaced by slug.
+///
+/// Tasks may depend on tasks living outside their package (e.g. the root
+/// `bun-install`); those edges are validated once the plans merge.
+///
+/// # Errors
+///
+/// Returns an error when a per-package or the merged plan fails to build
+/// (duplicate ids or dependency cycles).
+pub fn plan_workspace(
+    ctx: &upone_core::Context,
+    registry: &upone_core::Registry,
+) -> Result<WorkspacePlan, String> {
+    use std::collections::HashSet;
+    use upone_core::{Planner, Task};
+
+    let root = ctx.cwd.clone();
+    let (per_dir, detections) = detect_workspace_dirs(&root, registry);
+    let mut pkg_detections: Vec<(upone_core::Context, upone_core::Detection)> = Vec::new();
+    let mut planner = Planner::new(ctx);
+
+    for (dir_ctx, dir_detections) in per_dir {
+        let rel = rel_of(&root, &dir_ctx.cwd);
+        let slug = rel.map(dir_slug);
+
+        // Plan this directory's providers with its own cwd so tasks built
+        // here know where to run (e.g. `drizzle-kit generate` in packages/db).
+        let mut sub_planner = Planner::new(&dir_ctx);
+        for d in &dir_detections {
+            if let Some(provider) = registry.all().iter().find(|p| p.id() == d.provider) {
+                provider.plan(&dir_ctx, &mut sub_planner);
+            }
+        }
+        // Relaxed: a package may depend on a task outside this planner
+        // (e.g. the root install), validated once all plans merge below.
+        let local_plan = sub_planner
+            .build_allow_external()
+            .map_err(|e| format!("failed to build the plan: {e}"))?;
+
+        pkg_detections.extend(dir_detections.iter().cloned().map(|d| (dir_ctx.clone(), d)));
+
+        // Namespace per-package task ids so the same tech in two packages
+        // doesn't collide. Root tasks (install etc.) keep their canonical ids.
+        let local_ids: HashSet<String> = local_plan.ids().into_iter().collect();
+        for id in local_plan.ids() {
+            let Some(task) = local_plan.task(&id).cloned() else {
+                continue;
+            };
+            let (new_id, new_deps) = match &slug {
+                None => (id, task.deps),
+                Some(s) => (
+                    format!("{s}-{id}"),
+                    task.deps
+                        .into_iter()
+                        .map(|d| {
+                            if local_ids.contains(&d) {
+                                format!("{s}-{d}")
+                            } else {
+                                d
+                            }
+                        })
+                        .collect(),
+                ),
+            };
+            planner.add(Task {
+                id: new_id,
+                deps: new_deps,
+                ..task
+            });
+        }
+    }
+
+    let plan = planner
+        .build()
+        .map_err(|e| format!("failed to build the plan: {e}"))?;
+
+    Ok(WorkspacePlan {
+        detections,
+        package_detections: pkg_detections,
+        plan,
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -234,10 +431,7 @@ mod tests {
     use std::fs;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("upone-ws-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::testkit::temp_dir("ws", name)
     }
 
     #[test]
@@ -301,6 +495,170 @@ mod tests {
         assert!(out.is_empty());
         collect_globs(&root, &canon_root, &["packages".into()], &mut out);
         assert_eq!(out.len(), 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn walk_dirs_terminates_on_symlink_loop() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_dir("loop");
+        fs::create_dir_all(root.join("packages")).unwrap();
+        fs::write(root.join("package.json"), "{}").unwrap();
+        fs::write(root.join("packages").join("package.json"), "{}").unwrap();
+        // A cycle inside the root: `packages/back` resolves to the root,
+        // which `inside()` accepts because it does not escape outward.
+        symlink(&root, root.join("packages").join("back")).unwrap();
+
+        let canon_root = fs::canonicalize(&root).unwrap();
+        let mut out = Vec::new();
+        walk_dirs(&root, &mut out, &canon_root);
+        let _ = fs::remove_dir_all(&root);
+
+        // Must not recurse forever; only reachable dirs are reported.
+        let rels: Vec<String> = out
+            .iter()
+            .map(|p| p.strip_prefix(&canon_root).unwrap().display().to_string())
+            .collect();
+        assert!(rels.contains(&String::from("packages")));
+        assert_eq!(rels.len(), out.len());
+    }
+
+    fn write_ws_package(root: &Path, rel: &str, files: &[(&str, &str)]) {
+        let dir = root.join(rel);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.json"),
+            serde_json::json!({ "name": rel }).to_string(),
+        )
+        .unwrap();
+        for (name, content) in files {
+            fs::write(dir.join(name), content).unwrap();
+        }
+    }
+
+    #[test]
+    fn monorepo_plan_namespaces_package_tasks() {
+        let root = temp_dir("mono");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","workspaces":["packages/*"]}"#,
+        )
+        .unwrap();
+        fs::write(root.join("bun.lock"), "").unwrap();
+        write_ws_package(
+            &root,
+            "packages/db",
+            &[("drizzle.config.ts", "export default {};")],
+        );
+
+        let ctx = upone_core::Context { cwd: root.clone() };
+        let ws = plan_workspace(&ctx, &crate::build_registry()).unwrap();
+
+        let mut ids = ws.plan.ids();
+        ids.sort();
+        assert!(ids.contains(&"bun-install".into()));
+        assert!(ids.contains(&"packages_db-drizzle-check".into()));
+        assert!(ids.contains(&"packages_db-drizzle-generate".into()));
+        // Root tasks keep their canonical ids (no slug prefix).
+        assert!(!ids.iter().any(|i| i.starts_with("bun_")));
+
+        let install = ws.plan.task(&"bun-install".into()).unwrap();
+        assert_eq!(install.deps, ["bun-check"]);
+
+        // The package's generate depends on its own check and the root install.
+        let gen = ws
+            .plan
+            .task(&"packages_db-drizzle-generate".into())
+            .unwrap();
+        let mut deps = gen.deps.clone();
+        deps.sort();
+        assert_eq!(deps, ["bun-install", "packages_db-drizzle-check"]);
+
+        let drizzle = ws
+            .detections
+            .found
+            .iter()
+            .find(|d| d.provider == "drizzle")
+            .unwrap();
+        assert!(drizzle.reason.contains("(packages/db)"));
+        assert!(!ws.is_empty());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn monorepo_two_packages_same_tech_stay_distinct() {
+        let root = temp_dir("mono2");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","workspaces":["packages/*","apps/*"]}"#,
+        )
+        .unwrap();
+        fs::write(root.join("bun.lock"), "").unwrap();
+        write_ws_package(
+            &root,
+            "packages/db",
+            &[("drizzle.config.ts", "export default {};")],
+        );
+        write_ws_package(
+            &root,
+            "apps/web",
+            &[("drizzle.config.ts", "export default {};")],
+        );
+
+        let ctx = upone_core::Context { cwd: root.clone() };
+        let ws = plan_workspace(&ctx, &crate::build_registry()).unwrap();
+
+        let ids = ws.plan.ids();
+        assert!(ids.contains(&"packages_db-drizzle-check".into()));
+        assert!(ids.contains(&"apps_web-drizzle-check".into()));
+        assert_eq!(
+            ids.iter().filter(|i| i.ends_with("-drizzle-check")).count(),
+            2
+        );
+
+        let db_gen = ws
+            .plan
+            .task(&"packages_db-drizzle-generate".into())
+            .unwrap();
+        assert!(db_gen.deps.contains(&"packages_db-drizzle-check".into()));
+        assert!(!db_gen.deps.contains(&"apps_web-drizzle-check".into()));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn detect_workspace_reports_package_location_and_dedups() {
+        let root = temp_dir("detect");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","workspaces":["packages/*"]}"#,
+        )
+        .unwrap();
+        fs::write(root.join("bun.lock"), "").unwrap();
+        write_ws_package(
+            &root,
+            "packages/db",
+            &[("drizzle.config.ts", "export default {};")],
+        );
+
+        let ctx = upone_core::Context { cwd: root.clone() };
+        let (detected, pkg_dets) = detect_workspace(&ctx, &crate::build_registry());
+
+        // The root bun detection plus the package drizzle detection.
+        assert!(detected.found.iter().any(|d| d.provider == "bun"));
+        let drizzle = detected
+            .found
+            .iter()
+            .filter(|d| d.provider == "drizzle")
+            .collect::<Vec<_>>();
+        assert_eq!(drizzle.len(), 1);
+        assert!(drizzle[0].reason.contains("(packages/db)"));
+        assert_eq!(pkg_dets.len(), 2);
+        assert_eq!(detected.found.len(), 2);
+
         let _ = fs::remove_dir_all(&root);
     }
 }

@@ -96,3 +96,75 @@ pub fn detect(cwd: &Path, registry: &Registry) -> Detected {
     }
     out
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    struct MarkerA;
+    struct MarkerB;
+
+    impl Provider for MarkerA {
+        fn id(&self) -> &'static str {
+            "a"
+        }
+        fn signatures(&self) -> &'static [&'static str] {
+            &["a.lock"]
+        }
+        fn plan(&self, _ctx: &Context, _planner: &mut Planner<'_>) {}
+    }
+
+    impl Provider for MarkerB {
+        fn id(&self) -> &'static str {
+            "b"
+        }
+        fn signatures(&self) -> &'static [&'static str] {
+            &["b.lock"]
+        }
+        fn plan(&self, _ctx: &Context, _planner: &mut Planner<'_>) {}
+    }
+
+    #[test]
+    fn is_empty_defaults_to_true() {
+        assert!(Detected::default().is_empty());
+    }
+
+    #[test]
+    fn is_empty_false_when_anything_found() {
+        let mut detected = Detected::default();
+        detected.found.push(Detection {
+            provider: "x",
+            signature: "x".to_string(),
+            reason: "found x".to_string(),
+        });
+        assert!(!detected.is_empty());
+    }
+
+    #[test]
+    fn detect_matches_signatures_in_registry() {
+        let mut registry = Registry::new();
+        registry.register(Box::new(MarkerA));
+        registry.register(Box::new(MarkerB));
+
+        let dir = std::env::temp_dir().join(format!("upone-detect-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        std::fs::write(dir.join("b.lock"), "").expect("write file");
+        std::fs::write(dir.join("other.txt"), "").expect("write file");
+        let detected = detect(&dir, &registry);
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(detected.found.len(), 1);
+        assert_eq!(detected.found[0].provider, "b");
+        assert_eq!(detected.found[0].signature, "b.lock");
+    }
+
+    #[test]
+    fn detect_returns_nothing_on_empty_dir() {
+        let dir = std::env::temp_dir().join(format!("upone-detect-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let detected = detect(&dir, &Registry::new());
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(detected.is_empty());
+    }
+}

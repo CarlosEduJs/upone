@@ -5,6 +5,6 @@ export default defineConfig({
   schema: "./src/schema.ts",
   out: "./drizzle",
   dbCredentials: {
-    url: "postgresql://upone:upone@localhost:5432/upone",
+    url: "postgresql://upone:upone@localhost:25432/upone",
   },
 });

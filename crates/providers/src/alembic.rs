@@ -10,11 +10,11 @@ use std::path::Path;
 
 use upone_core::detect::Provider;
 use upone_core::plan::{Planner, RunOutcome, Task};
-use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
+use upone_core::readiness::ReadinessCheck;
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{migration_db_dep, python_install_task, spawn_cmd};
+use crate::cmd::{add_migration_plan, spawn_cmd, DbWiring, InstallKind};
 
 pub struct Alembic;
 
@@ -35,7 +35,7 @@ impl Provider for Alembic {
     }
 
     fn plan(&self, ctx: &Context, planner: &mut Planner<'_>) {
-        let mut check = Task::new(
+        let check = Task::new(
             "alembic-check",
             "check python venv for alembic",
             "checks that the project venv has the alembic module installed",
@@ -43,46 +43,30 @@ impl Provider for Alembic {
         .risk(Risk::Low)
         .run(check_alembic);
 
-        let mut upgrade = Task::new(
+        let upgrade = Task::new(
             "alembic-upgrade",
             "alembic upgrade head",
             "applies pending alembic migrations to the configured database (safe to repeat)",
         )
         .risk(Risk::High)
-        .depends_on(["alembic-check"])
         .run(alembic_upgrade);
 
-        if let Some(install) = python_install_task(&ctx.cwd) {
-            check = check.depends_on([install]);
-            upgrade = upgrade.depends_on(["alembic-check", install]);
-        }
-        if let Some(db) = migration_db_dep(&ctx.cwd) {
-            upgrade = upgrade.depends_on(["alembic-check", db]);
-        }
-
-        planner.add(check);
-        planner.add(upgrade);
+        add_migration_plan(
+            planner,
+            ctx,
+            check,
+            upgrade,
+            InstallKind::Python,
+            DbWiring::Database,
+        );
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<ReadinessCheck> {
-        let cwd = ctx.cwd.clone();
-        vec![ReadinessCheck::new(
+        vec![super::python::venv_check(
             "alembic-venv",
-            "project venv (.venv)",
             ".venv exists so alembic can run",
-            Importance::Required,
-            move |_ctx| {
-                if super::python::venv_exists(&cwd) {
-                    ReadinessStatus::Ready(".venv present".into())
-                } else {
-                    ReadinessStatus::NotReady {
-                        reason: ".venv not found".into(),
-                        remedy:
-                            "Run your python package manager's install (or 'upone up') to create it"
-                                .into(),
-                    }
-                }
-            },
+            "Run your python package manager's install (or 'upone up') to create it",
+            &ctx.cwd,
         )]
     }
 }

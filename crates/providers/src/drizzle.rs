@@ -7,7 +7,7 @@ use upone_core::plan::{Planner, RunOutcome, Task};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{spawn_cmd, which};
+use crate::cmd::{add_migration_plan, spawn_cmd, which, DbWiring, InstallKind};
 
 pub struct Drizzle;
 
@@ -35,7 +35,7 @@ impl Provider for Drizzle {
     }
 
     fn plan(&self, ctx: &Context, planner: &mut Planner<'_>) {
-        let mut check = Task::new(
+        let check = Task::new(
             "drizzle-check",
             "check drizzle-kit available",
             "checks dependencies and the drizzle CLI",
@@ -43,43 +43,23 @@ impl Provider for Drizzle {
         .risk(Risk::Low)
         .run(check_drizzle);
 
-        let mut gen = Task::new(
+        let gen = Task::new(
             "drizzle-generate",
             "drizzle-kit generate",
             "generates migrations from the schema (safe to repeat)",
         )
         .risk(Risk::Medium)
-        .depends_on(["drizzle-check"])
         .run(drizzle_generate);
 
-        if let Some(install) = crate::cmd::js_install_task(&ctx.cwd) {
-            check = check.depends_on([install]);
-            gen = gen.depends_on(["drizzle-check", install]);
-        }
-
-        planner.add(check);
-        planner.add(gen);
+        add_migration_plan(planner, ctx, check, gen, InstallKind::Js, DbWiring::None);
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {
-        use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
-
-        let cwd = ctx.cwd.clone();
-        vec![ReadinessCheck::new(
+        vec![crate::cmd::node_modules_check(
             "drizzle-deps",
-            "drizzle dependencies installed",
-            "node_modules present for drizzle-kit",
-            Importance::Required,
-            move |_ctx| {
-                if crate::cmd::node_modules_present(&cwd) {
-                    ReadinessStatus::Ready("node_modules present".into())
-                } else {
-                    ReadinessStatus::NotReady {
-                        reason: "node_modules missing for drizzle".into(),
-                        remedy: "Run your package manager's install or 'upone up'".into(),
-                    }
-                }
-            },
+            "drizzle",
+            "Run your package manager's install or 'upone up'",
+            &ctx.cwd,
         )]
     }
 }

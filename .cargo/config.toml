@@ -1,0 +1,4 @@
+# Adds `cargo xtask <cmd>` as a shortcut for `cargo run -p xtask -- <cmd>`.
+# Aliases are local-only conveniences and don't affect the release pipeline.
+[alias]
+xtask = "run -p xtask --"

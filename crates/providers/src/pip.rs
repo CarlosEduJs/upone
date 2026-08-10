@@ -9,7 +9,7 @@ use std::path::Path;
 
 use upone_core::detect::Provider;
 use upone_core::plan::{Planner, RunOutcome, Task};
-use upone_core::readiness::{Importance, ReadinessCheck, ReadinessStatus};
+use upone_core::readiness::ReadinessCheck;
 use upone_core::run::RunError;
 use upone_core::{Context, Detection, Risk};
 
@@ -73,22 +73,11 @@ impl Provider for Pip {
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<ReadinessCheck> {
-        let cwd = ctx.cwd.clone();
-        vec![ReadinessCheck::new(
+        vec![python::venv_check(
             "pip-venv",
-            "project venv (.venv)",
             ".venv exists and holds a python interpreter",
-            Importance::Required,
-            move |_ctx| {
-                if python::venv_exists(&cwd) {
-                    ReadinessStatus::Ready(".venv present".into())
-                } else {
-                    ReadinessStatus::NotReady {
-                        reason: ".venv not found".into(),
-                        remedy: "Run 'pip-venv' via 'upone up' or 'python3 -m venv .venv'".into(),
-                    }
-                }
-            },
+            "Run 'pip-venv' via 'upone up' or 'python3 -m venv .venv'",
+            &ctx.cwd,
         )]
     }
 }
