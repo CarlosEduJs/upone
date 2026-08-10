@@ -59,6 +59,62 @@ impl Report {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn step(id: &str, status: StepStatus) -> Step {
+        Step {
+            task_id: id.to_string(),
+            label: id.to_string(),
+            description: String::new(),
+            risk: Risk::Low,
+            status,
+            detail: None,
+        }
+    }
+
+    #[test]
+    fn errors_filters_error_steps() {
+        let mut report = Report::new();
+        report
+            .steps
+            .push(step("ok", StepStatus::Done(RunOutcome::Ran("ok".into()))));
+        report.steps.push(step("running", StepStatus::Running));
+        report
+            .steps
+            .push(step("boom", StepStatus::Error("bad".to_string())));
+
+        let errors = report.errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].task_id, "boom");
+        assert!(report.has_error());
+    }
+
+    #[test]
+    fn errors_empty_when_nothing_failed() {
+        let mut report = Report::new();
+        report.steps.push(step(
+            "ok",
+            StepStatus::Done(RunOutcome::Skipped("ok".into())),
+        ));
+        assert!(report.errors().is_empty());
+        assert!(!report.has_error());
+    }
+
+    #[test]
+    fn error_detail_is_preserved() {
+        let mut report = Report::new();
+        report
+            .steps
+            .push(step("boom", StepStatus::Error("bad".to_string())));
+        assert_eq!(
+            report.errors()[0].status,
+            StepStatus::Error("bad".to_string())
+        );
+    }
+}
+
 /// Progress event emitted during execution.
 #[derive(Debug)]
 pub enum Event {

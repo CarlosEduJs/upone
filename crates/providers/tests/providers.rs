@@ -1,11 +1,19 @@
 //! Provider detection tests (npm, pnpm, docker, prisma, drizzle,
 //! postgres by content, redis by content).
 
-#![allow(unused_crate_dependencies)]
 #![allow(clippy::unwrap_used)]
 
 use upone_core::detect::detect;
 use upone_providers::build_registry;
+
+/// Builds a package.json manifest with the given dependencies.
+fn manifest(deps: &[(&str, &str)]) -> String {
+    let mut map = serde_json::Map::new();
+    for (k, v) in deps {
+        map.insert((*k).to_string(), serde_json::json!(v));
+    }
+    serde_json::json!({ "dependencies": map }).to_string()
+}
 
 fn in_dir(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("upone-prov-{name}-{}", std::process::id()));
@@ -588,5 +596,257 @@ fn detects_gorm_and_sqlalchemy() {
         &[("requirements.txt", "requests==2.0.0\n")],
     );
     assert!(!ids(&dir).contains(&"sqlalchemy".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_bun() {
+    let dir = in_dir("bun", &[("bun.lock", "# bun lockfile")]);
+    let found = ids(&dir);
+    assert!(found.contains(&"bun".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir("bunb", &[("bun.lockb", "\0")]);
+    assert!(ids(&dir).contains(&"bun".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_cargo() {
+    let dir = in_dir("cargo", &[("Cargo.toml", "[package]\nname = \"demo\"\n")]);
+    assert!(ids(&dir).contains(&"cargo".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_biome_and_shadcn_and_turbo() {
+    let dir = in_dir("biome", &[("biome.json", "{\"formatter\":{}}")]);
+    assert!(ids(&dir).contains(&"biome".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir("shadcn", &[("components.json", "{\"style\":\"new-york\"}")]);
+    assert!(ids(&dir).contains(&"shadcn".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir("turbo", &[("turbo.json", "{\"tasks\":{}}")]);
+    assert!(ids(&dir).contains(&"turbo".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_dependency_based_providers() {
+    // better-auth by dependency.
+    let pkg = manifest(&[("better-auth", "^1.0.0")]);
+    let dir = in_dir("better-auth", &[("package.json", pkg.as_str())]);
+    assert!(ids(&dir).contains(&"better-auth".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // @trpc/server by dependency.
+    let pkg = manifest(&[("@trpc/server", "^11.0.0")]);
+    let dir = in_dir("trpc", &[("package.json", pkg.as_str())]);
+    assert!(ids(&dir).contains(&"trpc".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // next by both dependency and config file.
+    let pkg = manifest(&[("next", "^15.0.0")]);
+    let dir = in_dir("next-dep", &[("package.json", pkg.as_str())]);
+    assert!(ids(&dir).contains(&"next".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir(
+        "next-config",
+        &[(
+            "next.config.mjs",
+            "const nextConfig = {};\nexport default nextConfig;",
+        )],
+    );
+    assert!(ids(&dir).contains(&"next".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn dependency_providers_ignore_non_dependency_matches() {
+    // Only present in scripts/overrides must not match any of them.
+    let dir = in_dir(
+        "dep-neg",
+        &[(
+            "package.json",
+            r#"{"scripts":{"next":"echo nope","trpc":"x"},"overrides":{"better-auth":"1.0.0"}}"#,
+        )],
+    );
+    let found = ids(&dir);
+    assert!(!found.contains(&"next".to_string()));
+    assert!(!found.contains(&"trpc".to_string()));
+    assert!(!found.contains(&"better-auth".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_redis_by_conf_signature() {
+    let dir = in_dir("redis-conf", &[("redis.conf", "bind 127.0.0.1\n")]);
+    assert!(ids(&dir).contains(&"redis".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir(
+        "redis-sentinel",
+        &[("redis/sentinel.conf", "sentinel monitor mymaster\n")],
+    );
+    assert!(ids(&dir).contains(&"redis".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn detects_redis_by_url() {
+    // REDIS_URL with a redis scheme.
+    let dir = in_dir(
+        "redis-url",
+        &[(".env", "REDIS_URL=redis://localhost:6379/0")],
+    );
+    assert!(ids(&dir).contains(&"redis".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // rediss:// (TLS) counts too, and DATABASE_URL may hold a redis URL.
+    let dir = in_dir(
+        "redis-srv",
+        &[(".env.local", "DATABASE_URL=rediss://cache.example.com:6380")],
+    );
+    assert!(ids(&dir).contains(&"redis".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn does_not_detect_redis_when_value_merely_mentions_redis() {
+    // Wrong scheme, non-redis key, or a comment must not match.
+    let dir = in_dir(
+        "redis-neg-scheme",
+        &[(".env", "REDIS_URL=postgres://localhost/app")],
+    );
+    assert!(!ids(&dir).contains(&"redis".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir(
+        "redis-neg-key",
+        &[(".env.local", "CACHE_URL=redis://localhost:6379/0")],
+    );
+    assert!(!ids(&dir).contains(&"redis".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let dir = in_dir(
+        "redis-comment",
+        &[(".env", "# REDIS_URL=redis://localhost:6379/0")],
+    );
+    assert!(!ids(&dir).contains(&"redis".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn database_url_scheme_discriminates_mysql_and_mongo() {
+    // DATABASE_URL=postgres:// is postgres, never mysql or mongo.
+    let dir = in_dir(
+        "url-pg",
+        &[(
+            ".env",
+            "DATABASE_URL=postgres://user:pass@localhost:5432/app",
+        )],
+    );
+    let found = ids(&dir);
+    assert!(found.contains(&"postgres".to_string()));
+    assert!(!found.contains(&"mysql".to_string()));
+    assert!(!found.contains(&"mongo".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // DATABASE_URL=mysql:// is mysql, never postgres or mongo.
+    let dir = in_dir(
+        "url-my",
+        &[(".env", "DATABASE_URL=mysql://user:pass@localhost:3306/app")],
+    );
+    let found = ids(&dir);
+    assert!(found.contains(&"mysql".to_string()));
+    assert!(!found.contains(&"postgres".to_string()));
+    assert!(!found.contains(&"mongo".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // DATABASE_URL=mongodb:// is mongo, never mysql or postgres.
+    let dir = in_dir(
+        "url-mo",
+        &[(".env", "DATABASE_URL=mongodb://localhost:27017/app")],
+    );
+    let found = ids(&dir);
+    assert!(found.contains(&"mongo".to_string()));
+    assert!(!found.contains(&"mysql".to_string()));
+    assert!(!found.contains(&"postgres".to_string()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn optional_env_key_reports_warning_not_failure() {
+    use upone_core::readiness::ReadinessStatus;
+    use upone_core::{sweep, Context, Importance};
+    use upone_providers::collect_readiness_checks;
+
+    let dir = in_dir(
+        "optional-env",
+        &[(".env.example", "DATABASE_URL=\n# optional\nSTRIPE_KEY=\n")],
+    );
+    let ctx = Context { cwd: dir.clone() };
+    let reg = build_registry();
+    // No provider detections: only template requirements surface.
+    let checks = collect_readiness_checks(&ctx, &[], &reg);
+    assert_eq!(checks.len(), 2);
+
+    let report = sweep(&ctx, &checks);
+
+    let required = report
+        .results
+        .iter()
+        .find(|r| r.id == "env-DATABASE_URL")
+        .unwrap();
+    assert_eq!(required.importance, Importance::Required);
+    assert!(required.status.is_not_ready());
+
+    let optional = report
+        .results
+        .iter()
+        .find(|r| r.id == "env-STRIPE_KEY")
+        .unwrap();
+    assert_eq!(optional.importance, Importance::Optional);
+    assert!(matches!(optional.status, ReadinessStatus::Warning { .. }));
+    assert!(!report.is_ready());
+    assert_eq!(report.warnings().len(), 1);
+    assert_eq!(report.failures().len(), 1);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn provider_and_template_env_key_checks_are_deduplicated() {
+    use upone_core::detect::detect;
+    use upone_core::Context;
+    use upone_providers::collect_readiness_checks;
+
+    // Postgres is detected via DATABASE_URL (which adds an env-DATABASE_URL
+    // check) and .env.example lists the same key — the template one must not
+    // produce a second, conflicting check.
+    let dir = in_dir(
+        "dedup-env",
+        &[
+            (".env", "DATABASE_URL=postgres://localhost/app\n"),
+            (".env.example", "DATABASE_URL=postgres://localhost/app\n"),
+        ],
+    );
+    let reg = build_registry();
+    let root_ctx = Context { cwd: dir.clone() };
+    let detections = detect(&dir, &reg);
+    let pkg_dets = detections
+        .found
+        .iter()
+        .map(|d| (&root_ctx, d))
+        .collect::<Vec<_>>();
+
+    let checks = collect_readiness_checks(&root_ctx, &pkg_dets, &reg);
+    let env_checks = checks.iter().filter(|c| c.id == "env-DATABASE_URL").count();
+    assert_eq!(env_checks, 1);
+    assert!(checks.iter().any(|c| c.id == "postgres-tcp"));
+
     let _ = std::fs::remove_dir_all(&dir);
 }

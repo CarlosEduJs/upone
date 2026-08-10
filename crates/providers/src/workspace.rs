@@ -230,6 +230,203 @@ fn pnpm_workspaces(root: &Path) -> Option<Vec<String>> {
     }
 }
 
+/// Every directory to run detection on: the project root followed by each
+/// workspace package directory.
+fn all_dirs(root: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![root.to_path_buf()];
+    dirs.extend(package_dirs(root));
+    dirs
+}
+
+/// Relative display path of `dir` under `root`, or `None` when it is the root
+/// itself.
+fn rel_of<'a>(root: &'a Path, dir: &'a Path) -> Option<&'a Path> {
+    dir.strip_prefix(root)
+        .ok()
+        .filter(|rel| !rel.as_os_str().is_empty())
+}
+
+/// Merged result of detecting and planning a project, including every
+/// workspace package.
+pub struct WorkspacePlan {
+    /// Detections across the root and every package, root first, with the
+    /// package location surfaced in each reason.
+    pub detections: upone_core::Detected,
+    /// Per-package detections paired with the context that detected them.
+    pub package_detections: Vec<(upone_core::Context, upone_core::Detection)>,
+    /// Merged plan: per-package task ids namespaced by directory slug, root
+    /// tasks (install, etc.) keeping their canonical ids.
+    pub plan: upone_core::Plan,
+}
+
+impl WorkspacePlan {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.detections.is_empty()
+    }
+}
+
+/// Detects the project at the root and at every workspace package
+/// (monorepos), deduplicating same provider+signature within a package.
+///
+/// Returns the detections for the UI preview and the per-package list used by
+/// the readiness sweep.
+#[must_use]
+pub fn detect_workspace(
+    ctx: &upone_core::Context,
+    registry: &upone_core::Registry,
+) -> (
+    upone_core::Detected,
+    Vec<(upone_core::Context, upone_core::Detection)>,
+) {
+    use std::collections::HashSet;
+
+    let root = ctx.cwd.clone();
+    let mut detections = upone_core::Detected::default();
+    let mut pkg_detections: Vec<(upone_core::Context, upone_core::Detection)> = Vec::new();
+    let mut seen: HashSet<(String, String, String)> = HashSet::new();
+
+    for dir in &all_dirs(&root) {
+        let rel = rel_of(&root, dir);
+        let rel_display = rel.map(|r| r.display().to_string());
+        let dir_ctx = upone_core::Context { cwd: dir.clone() };
+        let dir_detections = upone_core::detect::detect(dir, registry);
+
+        for d in dir_detections.found {
+            // Distinct packages may report the same provider+signature (e.g.
+            // two packages with drizzle); keep them separate. Within one
+            // package a provider matches at most once, so no further dedup.
+            let key = (
+                rel_display.clone().unwrap_or_default(),
+                d.provider.to_string(),
+                d.signature.clone(),
+            );
+            if !seen.insert(key) {
+                continue;
+            }
+            pkg_detections.push((dir_ctx.clone(), d.clone()));
+            let reason = match &rel_display {
+                Some(r) => format!("{0} ({r})", d.reason),
+                None => d.reason,
+            };
+            detections.found.push(upone_core::Detection {
+                provider: d.provider,
+                signature: d.signature,
+                reason,
+            });
+        }
+    }
+
+    (detections, pkg_detections)
+}
+
+/// Plans every provider with its own working directory, then merges each
+/// per-package plan into one whose task ids are namespaced by slug.
+///
+/// Tasks may depend on tasks living outside their package (e.g. the root
+/// `bun-install`); those edges are validated once the plans merge.
+///
+/// # Errors
+///
+/// Returns an error when a per-package or the merged plan fails to build
+/// (duplicate ids or dependency cycles).
+pub fn plan_workspace(
+    ctx: &upone_core::Context,
+    registry: &upone_core::Registry,
+) -> Result<WorkspacePlan, String> {
+    use std::collections::HashSet;
+    use upone_core::{Planner, Task};
+
+    let root = ctx.cwd.clone();
+    let mut detections = upone_core::Detected::default();
+    let mut pkg_detections: Vec<(upone_core::Context, upone_core::Detection)> = Vec::new();
+    let mut seen: HashSet<(String, String, String)> = HashSet::new();
+    let mut planner = Planner::new(ctx);
+
+    for dir in &all_dirs(&root) {
+        let rel = rel_of(&root, dir);
+        let slug = rel.map(dir_slug);
+        let rel_display = rel.map(|r| r.display().to_string());
+        let dir_ctx = upone_core::Context { cwd: dir.clone() };
+
+        // Plan this directory's providers with its own cwd so tasks built
+        // here know where to run (e.g. `drizzle-kit generate` in packages/db).
+        let dir_detections = upone_core::detect::detect(dir, registry);
+        let mut sub_planner = Planner::new(&dir_ctx);
+        for d in &dir_detections.found {
+            if let Some(provider) = registry.all().iter().find(|p| p.id() == d.provider) {
+                provider.plan(&dir_ctx, &mut sub_planner);
+            }
+        }
+        // Relaxed: a package may depend on a task outside this planner
+        // (e.g. the root install), validated once all plans merge below.
+        let local_plan = sub_planner
+            .build_allow_external()
+            .map_err(|e| format!("failed to build the plan: {e}"))?;
+
+        // Surface detections with their package location in the reason.
+        for d in &dir_detections.found {
+            let key = (
+                rel_display.clone().unwrap_or_default(),
+                d.provider.to_string(),
+                d.signature.clone(),
+            );
+            if !seen.insert(key) {
+                continue;
+            }
+            pkg_detections.push((dir_ctx.clone(), d.clone()));
+            let reason = rel_display
+                .as_ref()
+                .map_or_else(|| d.reason.clone(), |r| format!("{0} ({r})", d.reason));
+            detections.found.push(upone_core::Detection {
+                provider: d.provider,
+                signature: d.signature.clone(),
+                reason,
+            });
+        }
+
+        // Namespace per-package task ids so the same tech in two packages
+        // doesn't collide. Root tasks (install etc.) keep their canonical ids.
+        let local_ids: HashSet<String> = local_plan.ids().into_iter().collect();
+        for id in local_plan.ids() {
+            let Some(task) = local_plan.task(&id).cloned() else {
+                continue;
+            };
+            let (new_id, new_deps) = match &slug {
+                None => (id, task.deps),
+                Some(s) => (
+                    format!("{s}-{id}"),
+                    task.deps
+                        .into_iter()
+                        .map(|d| {
+                            if local_ids.contains(&d) {
+                                format!("{s}-{d}")
+                            } else {
+                                d
+                            }
+                        })
+                        .collect(),
+                ),
+            };
+            planner.add(Task {
+                id: new_id,
+                deps: new_deps,
+                ..task
+            });
+        }
+    }
+
+    let plan = planner
+        .build()
+        .map_err(|e| format!("failed to build the plan: {e}"))?;
+
+    Ok(WorkspacePlan {
+        detections,
+        package_detections: pkg_detections,
+        plan,
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -329,5 +526,142 @@ mod tests {
             .collect();
         assert!(rels.contains(&String::from("packages")));
         assert_eq!(rels.len(), out.len());
+    }
+
+    fn write_ws_package(root: &Path, rel: &str, files: &[(&str, &str)]) {
+        let dir = root.join(rel);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.json"),
+            serde_json::json!({ "name": rel }).to_string(),
+        )
+        .unwrap();
+        for (name, content) in files {
+            fs::write(dir.join(name), content).unwrap();
+        }
+    }
+
+    #[test]
+    fn monorepo_plan_namespaces_package_tasks() {
+        let root = temp_dir("mono");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","workspaces":["packages/*"]}"#,
+        )
+        .unwrap();
+        fs::write(root.join("bun.lock"), "").unwrap();
+        write_ws_package(
+            &root,
+            "packages/db",
+            &[("drizzle.config.ts", "export default {};")],
+        );
+
+        let ctx = upone_core::Context { cwd: root.clone() };
+        let ws = plan_workspace(&ctx, &crate::build_registry()).unwrap();
+
+        let mut ids = ws.plan.ids();
+        ids.sort();
+        assert!(ids.contains(&"bun-install".into()));
+        assert!(ids.contains(&"packages_db-drizzle-check".into()));
+        assert!(ids.contains(&"packages_db-drizzle-generate".into()));
+        // Root tasks keep their canonical ids (no slug prefix).
+        assert!(!ids.iter().any(|i| i.starts_with("bun_")));
+
+        let install = ws.plan.task(&"bun-install".into()).unwrap();
+        assert_eq!(install.deps, ["bun-check"]);
+
+        // The package's generate depends on its own check and the root install.
+        let gen = ws
+            .plan
+            .task(&"packages_db-drizzle-generate".into())
+            .unwrap();
+        let mut deps = gen.deps.clone();
+        deps.sort();
+        assert_eq!(deps, ["bun-install", "packages_db-drizzle-check"]);
+
+        let drizzle = ws
+            .detections
+            .found
+            .iter()
+            .find(|d| d.provider == "drizzle")
+            .unwrap();
+        assert!(drizzle.reason.contains("(packages/db)"));
+        assert!(!ws.is_empty());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn monorepo_two_packages_same_tech_stay_distinct() {
+        let root = temp_dir("mono2");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","workspaces":["packages/*","apps/*"]}"#,
+        )
+        .unwrap();
+        fs::write(root.join("bun.lock"), "").unwrap();
+        write_ws_package(
+            &root,
+            "packages/db",
+            &[("drizzle.config.ts", "export default {};")],
+        );
+        write_ws_package(
+            &root,
+            "apps/web",
+            &[("drizzle.config.ts", "export default {};")],
+        );
+
+        let ctx = upone_core::Context { cwd: root.clone() };
+        let ws = plan_workspace(&ctx, &crate::build_registry()).unwrap();
+
+        let ids = ws.plan.ids();
+        assert!(ids.contains(&"packages_db-drizzle-check".into()));
+        assert!(ids.contains(&"apps_web-drizzle-check".into()));
+        assert_eq!(
+            ids.iter().filter(|i| i.ends_with("-drizzle-check")).count(),
+            2
+        );
+
+        let db_gen = ws
+            .plan
+            .task(&"packages_db-drizzle-generate".into())
+            .unwrap();
+        assert!(db_gen.deps.contains(&"packages_db-drizzle-check".into()));
+        assert!(!db_gen.deps.contains(&"apps_web-drizzle-check".into()));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn detect_workspace_reports_package_location_and_dedups() {
+        let root = temp_dir("detect");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","workspaces":["packages/*"]}"#,
+        )
+        .unwrap();
+        fs::write(root.join("bun.lock"), "").unwrap();
+        write_ws_package(
+            &root,
+            "packages/db",
+            &[("drizzle.config.ts", "export default {};")],
+        );
+
+        let ctx = upone_core::Context { cwd: root.clone() };
+        let (detected, pkg_dets) = detect_workspace(&ctx, &crate::build_registry());
+
+        // The root bun detection plus the package drizzle detection.
+        assert!(detected.found.iter().any(|d| d.provider == "bun"));
+        let drizzle = detected
+            .found
+            .iter()
+            .filter(|d| d.provider == "drizzle")
+            .collect::<Vec<_>>();
+        assert_eq!(drizzle.len(), 1);
+        assert!(drizzle[0].reason.contains("(packages/db)"));
+        assert_eq!(pkg_dets.len(), 2);
+        assert_eq!(detected.found.len(), 2);
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

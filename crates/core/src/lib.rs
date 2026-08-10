@@ -35,6 +35,17 @@ impl Risk {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn risk_labels() {
+        assert_eq!(Risk::Low.label(), "low");
+        assert_eq!(Risk::Medium.label(), "medium");
+        assert_eq!(Risk::High.label(), "high");
+    }
+}
 /// Result of a Provider detecting the project.
 #[derive(Debug, Clone)]
 pub struct Detection {

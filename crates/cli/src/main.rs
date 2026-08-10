@@ -5,12 +5,11 @@
 mod report;
 mod tui;
 
-use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::sync::{mpsc, Arc};
 
 use clap::Parser;
-use upone_core::{Context, Detected, Detection, Engine, Event, Report, Task};
+use upone_core::{Context, Detection, Engine, Event, Report};
 use upone_providers::{build_registry, collect_readiness_checks, workspace};
 
 #[derive(Debug, clap::Parser)]
@@ -62,112 +61,23 @@ fn cmd_up(
 ) -> anyhow::Result<()> {
     // Monorepos: detect at the root and at every workspace package, so a
     // project where drizzle lives under `packages/db` is still recognized.
-    let root = ctx.cwd.clone();
-    let mut all_dirs = vec![root.clone()];
-    all_dirs.extend(workspace::package_dirs(&root));
-
-    let mut detections = Detected::default();
-    let mut pkg_detections: Vec<(Context, Detection)> = Vec::new();
-    let mut seen: HashSet<(String, String, String)> = HashSet::new();
-    let mut planner = upone_core::Planner::new(ctx);
-    for dir in &all_dirs {
-        let rel = dir
-            .strip_prefix(&root)
-            .ok()
-            .filter(|rel| !rel.as_os_str().is_empty());
-        let slug = rel.map(workspace::dir_slug);
-        let rel_display = rel.map(|r| r.display().to_string());
-        let dir_ctx = Context { cwd: dir.clone() };
-
-        // Plan this directory's providers with its own cwd so tasks built
-        // here know where to run (e.g. `drizzle-kit generate` in packages/db).
-        let dir_detections = upone_core::detect::detect(dir, registry);
-        let mut sub_planner = upone_core::Planner::new(&dir_ctx);
-        for d in &dir_detections.found {
-            if let Some(provider) = registry.all().iter().find(|p| p.id() == d.provider) {
-                provider.plan(&dir_ctx, &mut sub_planner);
-            }
-        }
-        // Relaxed: a package may depend on the root install task (bun-install),
-        // which is validated once all plans are merged below.
-        let local_plan = sub_planner
-            .build_allow_external()
-            .map_err(|e| anyhow::anyhow!("failed to build the plan: {e}"))?;
-
-        // Surface detections with their package location in the reason.
-        for d in &dir_detections.found {
-            // Distinct packages may report the same provider+signature (e.g.
-            // two packages with drizzle); keep them separate. Within one
-            // package a provider matches at most once, so no further dedup.
-            let key = (
-                rel_display.clone().unwrap_or_default(),
-                d.provider.to_string(),
-                d.signature.clone(),
-            );
-            if !seen.insert(key) {
-                continue;
-            }
-            pkg_detections.push((dir_ctx.clone(), d.clone()));
-            let d = d.clone();
-            let reason = match &rel_display {
-                Some(r) => format!("{0} ({r})", d.reason),
-                None => d.reason,
-            };
-            detections.found.push(Detection {
-                provider: d.provider,
-                signature: d.signature,
-                reason,
-            });
-        }
-
-        // Namespace per-package task ids so the same tech in two packages
-        // doesn't collide. Root tasks (install etc.) keep their canonical ids.
-        let local_ids: HashSet<String> = local_plan.ids().into_iter().collect();
-        for id in local_plan.ids() {
-            let Some(task) = local_plan.task(&id).cloned() else {
-                continue;
-            };
-            let (new_id, new_deps) = match &slug {
-                None => (id, task.deps),
-                Some(s) => (
-                    format!("{s}-{id}"),
-                    task.deps
-                        .into_iter()
-                        .map(|d| {
-                            if local_ids.contains(&d) {
-                                format!("{s}-{d}")
-                            } else {
-                                d
-                            }
-                        })
-                        .collect(),
-                ),
-            };
-            planner.add(Task {
-                id: new_id,
-                deps: new_deps,
-                ..task
-            });
-        }
-    }
-
-    let plan = planner
-        .build()
+    let workspace_plan = workspace::plan_workspace(ctx, registry)
         .map_err(|e| anyhow::anyhow!("failed to build the plan: {e}"))?;
 
-    if detections.is_empty() {
+    if workspace_plan.detections.is_empty() {
         report::no_project(ctx);
         return Ok(());
     }
 
-    report::preview(&detections, &plan);
+    report::preview(&workspace_plan.detections, &workspace_plan.plan);
 
     if dry_run {
         report::dry_run_done();
         return Ok(());
     }
 
-    let plan = Arc::new(plan);
+    let plan = Arc::new(workspace_plan.plan);
+    let pkg_detections = workspace_plan.package_detections;
     let (tx, rx) = mpsc::channel::<Event>();
     let engine_ctx = ctx.clone();
     let engine_plan = plan.clone();
@@ -205,32 +115,7 @@ fn cmd_up(
 // ── upone ready ─────────────────────────────────────────────────────────────
 
 fn cmd_ready(ctx: &Context, registry: &upone_core::Registry) {
-    let root = ctx.cwd.clone();
-    let mut all_dirs = vec![root.clone()];
-    all_dirs.extend(workspace::package_dirs(&root));
-
-    let mut pkg_detections: Vec<(Context, Detection)> = Vec::new();
-    let mut seen: HashSet<(String, String, String)> = HashSet::new();
-
-    for dir in &all_dirs {
-        let rel_display = dir
-            .strip_prefix(&root)
-            .ok()
-            .filter(|rel| !rel.as_os_str().is_empty())
-            .map(|r| r.display().to_string());
-        let dir_ctx = Context { cwd: dir.clone() };
-        let dir_detections = upone_core::detect::detect(dir, registry);
-        for d in dir_detections.found {
-            let key = (
-                rel_display.clone().unwrap_or_default(),
-                d.provider.to_string(),
-                d.signature.clone(),
-            );
-            if seen.insert(key) {
-                pkg_detections.push((dir_ctx.clone(), d));
-            }
-        }
-    }
+    let (_, pkg_detections) = workspace::detect_workspace(ctx, registry);
 
     if pkg_detections.is_empty() {
         report::no_project(ctx);

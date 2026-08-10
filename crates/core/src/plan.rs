@@ -245,3 +245,117 @@ impl Plan {
         self.tasks.keys().cloned().collect()
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::Context;
+
+    fn ctx(cwd: &str) -> Context {
+        Context {
+            cwd: PathBuf::from(cwd),
+        }
+    }
+
+    fn plan_with(tasks: Vec<Task>, allow_external: bool) -> Result<Plan, String> {
+        let context = ctx("/proj");
+        let mut planner = Planner::new(&context);
+        for task in tasks {
+            planner.add(task);
+        }
+        if allow_external {
+            planner.build_allow_external()
+        } else {
+            planner.build()
+        }
+    }
+
+    /// Extracts the error message of a failed build.
+    fn build_err(tasks: Vec<Task>, allow_external: bool) -> String {
+        match plan_with(tasks, allow_external) {
+            Err(e) => e,
+            Ok(_) => panic!("expected the plan build to fail"),
+        }
+    }
+
+    #[test]
+    fn duplicate_id_rejected() {
+        let tasks = vec![Task::new("x", "x", "x"), Task::new("x", "y", "y")];
+        assert!(build_err(tasks, false).contains("duplicate task id 'x'"));
+    }
+
+    #[test]
+    fn duplicate_id_rejected_even_with_allow_external() {
+        let tasks = vec![Task::new("x", "x", "x"), Task::new("x", "y", "y")];
+        assert!(build_err(tasks, true).contains("duplicate task id 'x'"));
+    }
+
+    #[test]
+    fn unknown_dep_rejected() {
+        let tasks = vec![Task::new("a", "a", "a").depends_on(["missing"])];
+        assert!(build_err(tasks, false).contains("depends on 'missing'"));
+    }
+
+    #[test]
+    fn unknown_dep_allowed_with_allow_external() {
+        let tasks = vec![
+            Task::new("a", "a", "a").depends_on(["external"]),
+            Task::new("b", "b", "b"),
+        ];
+        assert!(plan_with(tasks, true).is_ok());
+    }
+
+    #[test]
+    fn cycle_rejected() {
+        let tasks = vec![
+            Task::new("a", "a", "a").depends_on(["b"]),
+            Task::new("b", "b", "b").depends_on(["a"]),
+        ];
+        assert!(build_err(tasks, false).contains("cycle"));
+    }
+
+    #[test]
+    fn topological_order_respected() {
+        let tasks = vec![
+            Task::new("a", "a", "a").depends_on(["b", "c"]),
+            Task::new("b", "b", "b").depends_on(["d"]),
+            Task::new("c", "c", "c"),
+            Task::new("d", "d", "d"),
+            Task::new("e", "e", "e").depends_on(["a"]),
+        ];
+        let plan = plan_with(tasks, false).unwrap();
+        assert_eq!(plan.ids().len(), 5);
+
+        let index = |id: &str| -> usize {
+            plan.levels
+                .iter()
+                .enumerate()
+                .find_map(|(i, level)| level.contains(&id.to_string()).then_some(i))
+                .expect("task in plan")
+        };
+        assert!(index("d") < index("b"));
+        assert!(index("b") < index("a"));
+        assert!(index("c") < index("a"));
+        assert!(index("a") < index("e"));
+    }
+
+    #[test]
+    fn independent_tasks_share_a_level() {
+        let tasks = vec![Task::new("a", "a", "a"), Task::new("b", "b", "b")];
+        let plan = plan_with(tasks, false).unwrap();
+        assert_eq!(plan.levels.len(), 1);
+    }
+
+    #[test]
+    fn omit_cwd_stamps_project_context() {
+        let context = ctx("/proj");
+        let mut planner = Planner::new(&context);
+        planner.add(Task::new("a", "a", "a"));
+        let plan = planner.build().unwrap();
+        assert_eq!(
+            plan.task(&"a".into()).unwrap().cwd,
+            Some(PathBuf::from("/proj"))
+        );
+    }
+}
