@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0
+
+- Delegate monorepo and workspace planning to upone-providers, slim down the CLI's own planning logic, and clean up the run report and tui output
+- update upone-core 0.3.0 -> 0.4.0
+- update upone-providers 0.6.0 -> 0.7.0
 ## 0.6.0
 
 - update upone-providers 0.5.0 -> 0.6.0

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.7.0
+
+Crate versions in this release:
+
+| Crate | Version |
+| --- | --- |
+| upone | 0.7.0 |
+| upone-core | 0.4.0 |
+| upone-providers | 0.7.0 |
+
+### upone
+
+- Delegate monorepo and workspace planning to upone-providers, slim down the CLI's own planning logic, and clean up the run report and tui output
+- update upone-core 0.3.0 -> 0.4.0
+- update upone-providers 0.6.0 -> 0.7.0
+
+### upone-core
+
+- Tighten the planner: reject duplicate task ids, missing dependencies and dependency cycles with clear errors, stamp every task with its working directory, support topological builds that ignore external tasks, and surface only real failures in the run report
+
+### upone-providers
+
+- Refactor providers around a shared command/migration helper layer and workspace planning (detect_workspace, plan_workspace, WorkspacePlan), detect redis through .env (REDIS_URL / postgres/redis DATABASE_URL schemes), drop the duplicated env-DATABASE_URL readiness check (now Optional/Warning), fix postgres readiness with a real protocol handshake so migrations no longer race the warm-up of a fresh container, and add a shared testkit plus provider tests
 ## 0.6.0
 
 Crate versions in this release:
