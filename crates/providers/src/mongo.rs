@@ -236,6 +236,9 @@ fn mongodb_target(uri: &str) -> Option<(String, u16)> {
 /// the URI is not an srv URI or has no hostname.
 fn srv_hostname(uri: &str) -> Option<String> {
     let authority = uri.strip_prefix("mongodb+srv://")?.split('/').next()?;
+    // A query string may follow the authority without a path separator
+    // (`host/?authSource=admin`); strip it before reading the host.
+    let authority = authority.split_once('?').map_or(authority, |(a, _)| a);
     let authority = authority.rsplit('@').next()?;
     let host = authority.split_once(':').map_or(authority, |(h, _)| h);
     if host.is_empty() {
@@ -247,10 +250,21 @@ fn srv_hostname(uri: &str) -> Option<String> {
 
 /// True when the hostname resolves to at least one address (DNS lookup, no
 /// connection). Used as the readiness probe for externally-managed `srv` URIs.
+/// The lookup runs on a worker thread with a bounded wait, so a slow or
+/// unresponsive resolver cannot hang the readiness sweep indefinitely.
 fn hostname_resolves(host: &str) -> bool {
-    format!("{host}:27017")
-        .to_socket_addrs()
-        .is_ok_and(|mut addrs| addrs.next().is_some())
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let host = host.to_string();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let ok = format!("{host}:27017")
+            .to_socket_addrs()
+            .is_ok_and(|mut addrs| addrs.next().is_some());
+        let _ = tx.send(ok);
+    });
+    rx.recv_timeout(Duration::from_secs(5)).unwrap_or(false)
 }
 
 /// Compose-backed: the `docker-up` task already started the service; just confirm it responds.

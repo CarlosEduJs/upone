@@ -400,18 +400,30 @@ pub enum InstallKind {
     Python,
 }
 
+/// Whether an ORM/db provider's action task should be wired to depend on the
+/// database task detected in the project (e.g. `postgres-up`), resolved by
+/// [`add_migration_plan`] from the project files.
+#[derive(Clone, Copy)]
+pub enum DbWiring {
+    /// The action only needs the install task (client generation, etc.).
+    None,
+    /// Also wire the detected database task (if any) into the action's deps.
+    Database,
+}
+
 /// Registers a `check` + `action` (migrate/generate) pair for the ORM/db
 /// providers, wiring the install and database dependencies that are only known
 /// after detection. Providers pass fully-built tasks and the helper wires
 /// them in; `install` resolves the install task id for the project, and
-/// `db_dependent` adds the detected DB task as an action dependency.
+/// `db_wiring` (when [`DbWiring::Database`]) adds the detected DB task as an
+/// action dependency.
 pub fn add_migration_plan(
     planner: &mut Planner<'_>,
     ctx: &Context,
     check: Task,
     action: Task,
     install: InstallKind,
-    db_dependent: bool,
+    db_wiring: DbWiring,
 ) {
     let check_id = check.id.clone();
     let mut action_deps = vec![check_id];
@@ -424,7 +436,7 @@ pub fn add_migration_plan(
         action_deps.push(install.to_string());
         check = check.depends_on([install]);
     }
-    if db_dependent {
+    if matches!(db_wiring, DbWiring::Database) {
         if let Some(db) = migration_db_dep(&ctx.cwd) {
             action_deps.push(db.to_string());
         }

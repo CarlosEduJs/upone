@@ -91,8 +91,11 @@ impl Provider for Postgres {
             format!("postgres (localhost:{port})"),
             "PostgreSQL is accepting TCP connections",
             Importance::Required,
+            // Single-attempt probe: readiness must be immediate, unlike the
+            // post-run verify task after docker-up which retries until the
+            // freshly-started container finishes booting.
             move |_ctx| {
-                if pg_accepting(port) {
+                if pg_accepting_with_deadline(port, std::time::Instant::now()) {
                     ReadinessStatus::Ready(format!("responding on localhost:{port}"))
                 } else {
                     ReadinessStatus::NotReady {
@@ -103,8 +106,12 @@ impl Provider for Postgres {
             },
         )];
 
-        // DATABASE_URL env key check.
-        check_env_key(&ctx.cwd, &mut checks);
+        // Require DATABASE_URL only when detection came from it — a compose
+        // definition (or an inline ORM config) already pins the connection
+        // target, so ready-ness can be satisfied by compose/services alone.
+        if !files_contain(&ctx.cwd, COMPOSE_FILES, &["postgres", "postgresql"]) {
+            check_env_key(&ctx.cwd, &mut checks);
+        }
         checks
     }
 }
@@ -119,9 +126,17 @@ impl Provider for Postgres {
 /// with a packet (`R` auth request, `Z` ready-for-query, `E` error, ...) as
 /// soon as it reaches the auth stage, so *any* bytes back mean it's accepting.
 fn pg_accepting(port: u16) -> bool {
+    pg_accepting_with_deadline(
+        port,
+        std::time::Instant::now() + std::time::Duration::from_secs(10),
+    )
+}
+
+/// Like [`pg_accepting`] but bounded by `deadline`; the readiness path passes
+/// an already-elapsed deadline so it makes exactly one attempt.
+fn pg_accepting_with_deadline(port: u16, deadline: std::time::Instant) -> bool {
     use std::io::{Read, Write};
     use std::net::{TcpStream, ToSocketAddrs};
-    use std::time::{Duration, Instant};
 
     let mut startup = Vec::with_capacity(64);
     startup.extend_from_slice(&[0u8; 4]); // message length, patched below
@@ -136,32 +151,35 @@ fn pg_accepting(port: u16) -> bool {
     let len = u32::try_from(startup.len()).unwrap_or(u32::MAX);
     startup[..4].copy_from_slice(&len.to_be_bytes());
 
-    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let Ok(addrs) = ("127.0.0.1", port).to_socket_addrs() else {
             return false;
         };
         for addr in addrs {
-            let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
+            let Ok(mut s) =
+                TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500))
+            else {
                 continue;
             };
             let Ok(mut read) = s.try_clone() else {
                 continue;
             };
-            if s.set_read_timeout(Some(Duration::from_millis(750)))
+            if s.set_read_timeout(Some(std::time::Duration::from_millis(750)))
                 .is_err()
             {
                 continue;
             }
             let mut buf = [0u8; 32];
-            if s.write_all(&startup).is_ok() && read.read(&mut buf).is_ok() {
+            // A positive byte count from the server is required — a clean
+            // EOF (`Ok(0)`) or a read error means it is not accepting yet.
+            if s.write_all(&startup).is_ok() && read.read(&mut buf).is_ok_and(|n| n > 0) {
                 return true;
             }
         }
-        if Instant::now() >= deadline {
+        if std::time::Instant::now() >= deadline {
             return false;
         }
-        std::thread::sleep(Duration::from_millis(300));
+        std::thread::sleep(std::time::Duration::from_millis(300));
     }
 }
 

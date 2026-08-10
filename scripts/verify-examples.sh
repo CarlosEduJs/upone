@@ -143,8 +143,9 @@ rust-hello)     check_dry_run "$dir" "check cargo installed" "cargo build" ;;
         if docker_reachable; then
           check_exec "$dir"
           case "$name" in
-            mongoose|orm-knex|orm-sequelize|orm-typeorm)
-              # Remove what `npm install` wrote so the fixture stays clean.
+            mongoose|orm-knex|orm-sequelize|orm-typeorm|orm-drizzle)
+              # Remove what `npm install` / `pnpm install` wrote so the
+              # fixture stays clean.
               rm -rf "$dir/node_modules" ;;
           esac
           # Tear the example down so a later docker example can bind the same

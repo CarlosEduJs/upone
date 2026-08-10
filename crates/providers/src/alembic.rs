@@ -14,7 +14,7 @@ use upone_core::readiness::ReadinessCheck;
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{add_migration_plan, spawn_cmd, InstallKind};
+use crate::cmd::{add_migration_plan, spawn_cmd, DbWiring, InstallKind};
 
 pub struct Alembic;
 
@@ -51,7 +51,14 @@ impl Provider for Alembic {
         .risk(Risk::High)
         .run(alembic_upgrade);
 
-        add_migration_plan(planner, ctx, check, upgrade, InstallKind::Python, true);
+        add_migration_plan(
+            planner,
+            ctx,
+            check,
+            upgrade,
+            InstallKind::Python,
+            DbWiring::Database,
+        );
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<ReadinessCheck> {

@@ -61,8 +61,9 @@ fn cmd_up(
 ) -> anyhow::Result<()> {
     // Monorepos: detect at the root and at every workspace package, so a
     // project where drizzle lives under `packages/db` is still recognized.
-    let workspace_plan = workspace::plan_workspace(ctx, registry)
-        .map_err(|e| anyhow::anyhow!("failed to build the plan: {e}"))?;
+    // `plan_workspace` already prefixes every failure with "failed to build
+    // the plan"; keep that message single-source (see workspace.rs).
+    let workspace_plan = workspace::plan_workspace(ctx, registry).map_err(anyhow::Error::msg)?;
 
     if workspace_plan.detections.is_empty() {
         report::no_project(ctx);

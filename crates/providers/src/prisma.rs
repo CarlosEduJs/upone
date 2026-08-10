@@ -7,7 +7,7 @@ use upone_core::plan::{Planner, RunOutcome, Task};
 use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
-use crate::cmd::{add_migration_plan, spawn_cmd, which, InstallKind};
+use crate::cmd::{add_migration_plan, spawn_cmd, which, DbWiring, InstallKind};
 
 pub struct Prisma;
 
@@ -45,7 +45,7 @@ impl Provider for Prisma {
         .risk(Risk::Medium)
         .run(prisma_generate);
 
-        add_migration_plan(planner, ctx, check, gen, InstallKind::Js, false);
+        add_migration_plan(planner, ctx, check, gen, InstallKind::Js, DbWiring::None);
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<upone_core::readiness::ReadinessCheck> {

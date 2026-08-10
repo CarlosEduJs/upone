@@ -14,7 +14,7 @@ use upone_core::{Context, Risk};
 
 use crate::cmd::{
     add_migration_plan, js_managed, local_cli, node_modules_present, package_has_dependency,
-    spawn_cmd, which, InstallKind,
+    spawn_cmd, which, DbWiring, InstallKind,
 };
 
 const KNEXFILES: &[&str] = &["knexfile.ts", "knexfile.js", "knexfile.mts", "knexfile.cts"];
@@ -67,7 +67,14 @@ impl Provider for Knex {
         .risk(Risk::High)
         .run(knex_migrate);
 
-        add_migration_plan(planner, ctx, check, migrate, InstallKind::Js, true);
+        add_migration_plan(
+            planner,
+            ctx,
+            check,
+            migrate,
+            InstallKind::Js,
+            DbWiring::Database,
+        );
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<ReadinessCheck> {

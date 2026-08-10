@@ -61,6 +61,26 @@ fn risk(plan: &Plan, id: &str) -> Risk {
     plan.task(&id.into()).unwrap().risk
 }
 
+/// Runs `f` with a clean environment, free of the connection-string vars that
+/// provider detection reads first (`os::env` outranks `.env` files). Guards against
+/// an ambient `DATABASE_URL`/`REDIS_URL` in the runner's shell leaking into
+/// these fixtures, which would flip which provider/edge is detected.
+fn with_clean_db_env<T>(f: impl FnOnce() -> T) -> T {
+    const KEYS: [&str; 2] = ["DATABASE_URL", "REDIS_URL"];
+    let saved: Vec<(String, String)> = KEYS
+        .iter()
+        .filter_map(|k| std::env::var(k).ok().map(|v| ((*k).to_string(), v)))
+        .collect();
+    for (k, _) in &saved {
+        std::env::remove_var(k);
+    }
+    let out = f();
+    for (k, v) in saved {
+        std::env::set_var(k, v);
+    }
+    out
+}
+
 #[test]
 fn cargo_plan_emits_check_and_build() {
     let dir = in_dir("cargo", &[("Cargo.toml", "[package]\nname = \"x\"\n")]);
@@ -142,53 +162,57 @@ fn alembic_plan_wires_python_install_and_db_edges() {
 
 #[test]
 fn redis_plan_depends_on_docker_up_only_in_compose() {
-    let dir = in_dir(
-        "redis-compose",
-        &[("compose.yml", "services:\n  cache:\n    image: redis:7\n")],
-    );
-    let plan = planned(&dir);
-    assert_eq!(deps(&plan, "redis-up"), ["docker-up"]);
-    assert_eq!(risk(&plan, "redis-up"), Risk::Low);
-    let _ = std::fs::remove_dir_all(&dir);
+    with_clean_db_env(|| {
+        let dir = in_dir(
+            "redis-compose",
+            &[("compose.yml", "services:\n  cache:\n    image: redis:7\n")],
+        );
+        let plan = planned(&dir);
+        assert_eq!(deps(&plan, "redis-up"), ["docker-up"]);
+        assert_eq!(risk(&plan, "redis-up"), Risk::Low);
+        let _ = std::fs::remove_dir_all(&dir);
 
-    let dir = in_dir("redis-standalone", &[("redis.conf", "# redis\n")]);
-    let plan = planned(&dir);
-    assert!(deps(&plan, "redis-up").is_empty());
-    assert!(!task_ids(&plan).contains(&"docker-up".to_string()));
-    let _ = std::fs::remove_dir_all(&dir);
+        let dir = in_dir("redis-standalone", &[("redis.conf", "# redis\n")]);
+        let plan = planned(&dir);
+        assert!(deps(&plan, "redis-up").is_empty());
+        assert!(!task_ids(&plan).contains(&"docker-up".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
 
-    // Configurable via REDIS_URL: no compose, no docker dependency, and the
-    // task becomes a URI verification.
-    let dir = in_dir(
-        "redis-uri",
-        &[(".env", "REDIS_URL=redis://mycache:6380/0\n")],
-    );
-    let plan = planned(&dir);
-    assert!(deps(&plan, "redis-up").is_empty());
-    assert!(!task_ids(&plan).contains(&"docker-up".to_string()));
-    assert_eq!(
-        plan.task(&"redis-up".into()).unwrap().label,
-        "verify redis URI"
-    );
-    let _ = std::fs::remove_dir_all(&dir);
+        // Configurable via REDIS_URL: no compose, no docker dependency, and the
+        // task becomes a URI verification.
+        let dir = in_dir(
+            "redis-uri",
+            &[(".env", "REDIS_URL=redis://mycache:6380/0\n")],
+        );
+        let plan = planned(&dir);
+        assert!(deps(&plan, "redis-up").is_empty());
+        assert!(!task_ids(&plan).contains(&"docker-up".to_string()));
+        assert_eq!(
+            plan.task(&"redis-up".into()).unwrap().label,
+            "verify redis URI"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    });
 }
 
 #[test]
 fn postgres_plan_depends_on_docker_up_only_in_compose() {
-    let dir = in_dir(
-        "pg-compose",
-        &[("compose.yml", "services:\n  db:\n    image: postgres:16\n")],
-    );
-    let plan = planned(&dir);
-    assert_eq!(deps(&plan, "postgres-up"), ["docker-up"]);
-    let _ = std::fs::remove_dir_all(&dir);
+    with_clean_db_env(|| {
+        let dir = in_dir(
+            "pg-compose",
+            &[("compose.yml", "services:\n  db:\n    image: postgres:16\n")],
+        );
+        let plan = planned(&dir);
+        assert_eq!(deps(&plan, "postgres-up"), ["docker-up"]);
+        let _ = std::fs::remove_dir_all(&dir);
 
-    // Detectable via DATABASE_URL only: no compose, no docker dependency.
-    let dir = in_dir(
-        "pg-env",
-        &[(".env", "DATABASE_URL=postgres://localhost/app\n")],
-    );
-    let plan = planned(&dir);
-    assert!(deps(&plan, "postgres-up").is_empty());
-    let _ = std::fs::remove_dir_all(&dir);
+        // Detectable via DATABASE_URL only: no compose, no docker dependency.
+        let dir = in_dir(
+            "pg-env",
+            &[(".env", "DATABASE_URL=postgres://localhost/app\n")],
+        );
+        let plan = planned(&dir);
+        assert!(deps(&plan, "postgres-up").is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    });
 }

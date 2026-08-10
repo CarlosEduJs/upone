@@ -26,8 +26,6 @@ const COMPOSE_FILES: &[&str] = &[
     "compose.yaml",
 ];
 
-const ENV_FILES: &[&str] = &[".env", ".env.local"];
-
 /// Env keys that may hold a redis connection URL.
 const REDIS_URL_KEYS: &[&str] = &["REDIS_URL", "DATABASE_URL"];
 
@@ -52,7 +50,7 @@ impl Provider for Redis {
                 reason: "redis detected in docker-compose".into(),
             });
         }
-        if env_has_redis_url(cwd) {
+        if redis_uri(cwd).is_some() {
             return Some(upone_core::Detection {
                 provider: "redis",
                 signature: ".env (REDIS_URL redis)".into(),
@@ -109,7 +107,7 @@ impl Provider for Redis {
         let mut checks = Vec::new();
 
         if files_contain(&ctx.cwd, COMPOSE_FILES, &["redis", "redislabs/redis"]) {
-            let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 6379);
+            let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, LOCAL_PORT);
             checks.push(ReadinessCheck::new(
                 "redis-tcp",
                 format!("redis (localhost:{port})"),
@@ -146,34 +144,18 @@ impl Provider for Redis {
                     },
                 },
             ));
-            checks.push(ReadinessCheck::new(
-                "redis-uri-env",
-                "REDIS_URL",
-                "a redis connection string is set",
-                Importance::Required,
-                move |_ctx| {
-                    if redis_uri(&cwd).is_some() {
-                        ReadinessStatus::Ready("found".into())
-                    } else {
-                        ReadinessStatus::NotReady {
-                            reason: "REDIS_URL (or DATABASE_URL with a redis:// URL) not found in process env or .env* files".into(),
-                            remedy: "Set REDIS_URL in your .env.local or shell environment".into(),
-                        }
-                    }
-                },
-            ));
         } else {
             checks.push(ReadinessCheck::new(
                 "redis-tcp",
-                "redis (localhost:6379)",
+                format!("redis (localhost:{LOCAL_PORT})"),
                 "Redis is accepting TCP connections",
                 Importance::Required,
                 move |_ctx| {
-                    if tcp_reachable("127.0.0.1", 6379) {
-                        ReadinessStatus::Ready("responding on localhost:6379".into())
+                    if tcp_reachable("127.0.0.1", LOCAL_PORT) {
+                        ReadinessStatus::Ready(format!("responding on localhost:{LOCAL_PORT}"))
                     } else {
                         ReadinessStatus::NotReady {
-                            reason: "redis not responding on localhost:6379".into(),
+                            reason: format!("redis not responding on localhost:{LOCAL_PORT}"),
                             remedy: "Run 'docker compose up -d' or start redis manually".into(),
                         }
                     }
@@ -181,13 +163,32 @@ impl Provider for Redis {
             ));
         }
 
+        // Evaluated unconditionally (matching mongo-uri-env), so a project is
+        // flagged as not ready when no redis connection string is configured.
+        checks.push(ReadinessCheck::new(
+            "redis-uri-env",
+            "REDIS_URL",
+            "a redis connection string is set",
+            Importance::Required,
+            move |_ctx| {
+                if redis_uri(&cwd).is_some() {
+                    ReadinessStatus::Ready("found".into())
+                } else {
+                    ReadinessStatus::NotReady {
+                        reason: "REDIS_URL (or DATABASE_URL with a redis:// URL) not found in process env or .env* files".into(),
+                        remedy: "Set REDIS_URL in your .env.local or shell environment".into(),
+                    }
+                }
+            },
+        ));
+
         checks
     }
 }
 
 /// Compose-backed: the `docker-up` task already started the service; just confirm it responds.
 fn redis_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 6379);
+    let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, LOCAL_PORT);
     if tcp_reachable("127.0.0.1", port) {
         emit(&format!("redis responding on localhost:{port}"));
         Ok(RunOutcome::Skipped("redis already up".into()))
@@ -228,7 +229,7 @@ fn redis_uri_verify(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutc
 
 /// No compose definition: nothing here can start redis, so it reports clearly.
 fn redis_check(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
-    let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, 6379);
+    let port = compose_host_port(&ctx.cwd, COMPOSE_FILES, LOCAL_PORT);
     if tcp_reachable("127.0.0.1", port) {
         emit(&format!("redis responding on localhost:{port}"));
         Ok(RunOutcome::Skipped("redis already up".into()))
@@ -247,38 +248,6 @@ fn redis_check(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, 
 /// redis word (or use another scheme) are never accepted.
 fn is_redis_uri(value: &str) -> bool {
     value.starts_with("redis://") || value.starts_with("rediss://")
-}
-
-/// Strips a pair of surrounding quotes from an env value, if present.
-fn unquote(value: &str) -> &str {
-    if value.len() >= 2
-        && ((value.starts_with('"') && value.ends_with('"'))
-            || (value.starts_with('\'') && value.ends_with('\'')))
-    {
-        &value[1..value.len() - 1]
-    } else {
-        value
-    }
-}
-
-/// Scans the env files for a `REDIS_URL`/`DATABASE_URL` whose value actually
-/// uses a redis scheme (file-based, for detection).
-fn env_has_redis_url(cwd: &Path) -> bool {
-    ENV_FILES.iter().any(|file| {
-        std::fs::read_to_string(cwd.join(file)).is_ok_and(|content| {
-            content.lines().any(|line| {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') {
-                    return false;
-                }
-                let line = line.strip_prefix("export ").unwrap_or(line);
-                let Some((key, value)) = line.split_once('=') else {
-                    return false;
-                };
-                REDIS_URL_KEYS.contains(&key.trim()) && is_redis_uri(unquote(value.trim()))
-            })
-        })
-    })
 }
 
 /// Resolves the first configured redis connection string from the process

@@ -266,6 +266,59 @@ impl WorkspacePlan {
     }
 }
 
+/// Shared detection over the project root and every workspace package
+/// (monorepos), deduplicating same provider+signature within a single package.
+///
+/// Returns the per-directory detections paired with the context that detected
+/// them (used by the planner and the readiness sweep) plus a merged view for
+/// the UI preview.
+fn detect_workspace_dirs(
+    root: &Path,
+    registry: &upone_core::Registry,
+) -> (
+    Vec<(upone_core::Context, Vec<upone_core::Detection>)>,
+    upone_core::Detected,
+) {
+    use std::collections::HashSet;
+
+    let mut merged = upone_core::Detected::default();
+    let mut per_dir: Vec<(upone_core::Context, Vec<upone_core::Detection>)> = Vec::new();
+    let mut seen: HashSet<(String, String, String)> = HashSet::new();
+
+    for dir in &all_dirs(root) {
+        let rel = rel_of(root, dir);
+        let rel_display = rel.map(|r| r.display().to_string());
+        let dir_ctx = upone_core::Context { cwd: dir.clone() };
+        let dir_detections = upone_core::detect::detect(dir, registry);
+
+        for d in &dir_detections.found {
+            // Distinct packages may report the same provider+signature (e.g.
+            // two packages with drizzle); keep them separate. Within one
+            // package a provider matches at most once, so no further dedup.
+            let key = (
+                rel_display.clone().unwrap_or_default(),
+                d.provider.to_string(),
+                d.signature.clone(),
+            );
+            if !seen.insert(key) {
+                continue;
+            }
+            let reason = rel_display
+                .as_ref()
+                .map_or_else(|| d.reason.clone(), |r| format!("{0} ({r})", d.reason));
+            merged.found.push(upone_core::Detection {
+                provider: d.provider,
+                signature: d.signature.clone(),
+                reason,
+            });
+        }
+
+        per_dir.push((dir_ctx, dir_detections.found));
+    }
+
+    (per_dir, merged)
+}
+
 /// Detects the project at the root and at every workspace package
 /// (monorepos), deduplicating same provider+signature within a package.
 ///
@@ -279,45 +332,12 @@ pub fn detect_workspace(
     upone_core::Detected,
     Vec<(upone_core::Context, upone_core::Detection)>,
 ) {
-    use std::collections::HashSet;
-
-    let root = ctx.cwd.clone();
-    let mut detections = upone_core::Detected::default();
-    let mut pkg_detections: Vec<(upone_core::Context, upone_core::Detection)> = Vec::new();
-    let mut seen: HashSet<(String, String, String)> = HashSet::new();
-
-    for dir in &all_dirs(&root) {
-        let rel = rel_of(&root, dir);
-        let rel_display = rel.map(|r| r.display().to_string());
-        let dir_ctx = upone_core::Context { cwd: dir.clone() };
-        let dir_detections = upone_core::detect::detect(dir, registry);
-
-        for d in dir_detections.found {
-            // Distinct packages may report the same provider+signature (e.g.
-            // two packages with drizzle); keep them separate. Within one
-            // package a provider matches at most once, so no further dedup.
-            let key = (
-                rel_display.clone().unwrap_or_default(),
-                d.provider.to_string(),
-                d.signature.clone(),
-            );
-            if !seen.insert(key) {
-                continue;
-            }
-            pkg_detections.push((dir_ctx.clone(), d.clone()));
-            let reason = match &rel_display {
-                Some(r) => format!("{0} ({r})", d.reason),
-                None => d.reason,
-            };
-            detections.found.push(upone_core::Detection {
-                provider: d.provider,
-                signature: d.signature,
-                reason,
-            });
-        }
-    }
-
-    (detections, pkg_detections)
+    let (per_dir, detections) = detect_workspace_dirs(&ctx.cwd, registry);
+    let package_detections = per_dir
+        .into_iter()
+        .flat_map(|(dir_ctx, found)| found.into_iter().map(move |d| (dir_ctx.clone(), d)))
+        .collect();
+    (detections, package_detections)
 }
 
 /// Plans every provider with its own working directory, then merges each
@@ -338,22 +358,18 @@ pub fn plan_workspace(
     use upone_core::{Planner, Task};
 
     let root = ctx.cwd.clone();
-    let mut detections = upone_core::Detected::default();
+    let (per_dir, detections) = detect_workspace_dirs(&root, registry);
     let mut pkg_detections: Vec<(upone_core::Context, upone_core::Detection)> = Vec::new();
-    let mut seen: HashSet<(String, String, String)> = HashSet::new();
     let mut planner = Planner::new(ctx);
 
-    for dir in &all_dirs(&root) {
-        let rel = rel_of(&root, dir);
+    for (dir_ctx, dir_detections) in per_dir {
+        let rel = rel_of(&root, &dir_ctx.cwd);
         let slug = rel.map(dir_slug);
-        let rel_display = rel.map(|r| r.display().to_string());
-        let dir_ctx = upone_core::Context { cwd: dir.clone() };
 
         // Plan this directory's providers with its own cwd so tasks built
         // here know where to run (e.g. `drizzle-kit generate` in packages/db).
-        let dir_detections = upone_core::detect::detect(dir, registry);
         let mut sub_planner = Planner::new(&dir_ctx);
-        for d in &dir_detections.found {
+        for d in &dir_detections {
             if let Some(provider) = registry.all().iter().find(|p| p.id() == d.provider) {
                 provider.plan(&dir_ctx, &mut sub_planner);
             }
@@ -364,26 +380,7 @@ pub fn plan_workspace(
             .build_allow_external()
             .map_err(|e| format!("failed to build the plan: {e}"))?;
 
-        // Surface detections with their package location in the reason.
-        for d in &dir_detections.found {
-            let key = (
-                rel_display.clone().unwrap_or_default(),
-                d.provider.to_string(),
-                d.signature.clone(),
-            );
-            if !seen.insert(key) {
-                continue;
-            }
-            pkg_detections.push((dir_ctx.clone(), d.clone()));
-            let reason = rel_display
-                .as_ref()
-                .map_or_else(|| d.reason.clone(), |r| format!("{0} ({r})", d.reason));
-            detections.found.push(upone_core::Detection {
-                provider: d.provider,
-                signature: d.signature.clone(),
-                reason,
-            });
-        }
+        pkg_detections.extend(dir_detections.iter().cloned().map(|d| (dir_ctx.clone(), d)));
 
         // Namespace per-package task ids so the same tech in two packages
         // doesn't collide. Root tasks (install etc.) keep their canonical ids.

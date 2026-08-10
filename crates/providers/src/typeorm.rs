@@ -14,7 +14,7 @@ use upone_core::{Context, Risk};
 
 use crate::cmd::{
     add_migration_plan, local_cli, node_modules_present, package_has_dependency, spawn_cmd, which,
-    InstallKind,
+    DbWiring, InstallKind,
 };
 
 const DATA_SOURCE_FILES: &[&str] = &[
@@ -81,7 +81,14 @@ impl Provider for Typeorm {
         .risk(Risk::High)
         .run(typeorm_migrate);
 
-        add_migration_plan(planner, ctx, check, migrate, InstallKind::Js, true);
+        add_migration_plan(
+            planner,
+            ctx,
+            check,
+            migrate,
+            InstallKind::Js,
+            DbWiring::Database,
+        );
     }
 }
 

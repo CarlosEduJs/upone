@@ -14,7 +14,7 @@ use upone_core::run::RunError;
 use upone_core::{Context, Risk};
 
 use crate::cmd::{
-    add_migration_plan, js_managed, local_cli, package_has_dependency, spawn_cmd, which,
+    add_migration_plan, js_managed, local_cli, package_has_dependency, spawn_cmd, which, DbWiring,
     InstallKind,
 };
 
@@ -65,7 +65,14 @@ impl Provider for Sequelize {
         .risk(Risk::High)
         .run(sequelize_migrate);
 
-        add_migration_plan(planner, ctx, check, migrate, InstallKind::Js, true);
+        add_migration_plan(
+            planner,
+            ctx,
+            check,
+            migrate,
+            InstallKind::Js,
+            DbWiring::Database,
+        );
     }
 
     fn readiness_checks(&self, ctx: &Context) -> Vec<ReadinessCheck> {

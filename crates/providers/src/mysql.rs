@@ -44,8 +44,7 @@ impl Provider for Mysql {
     }
 
     fn signatures(&self) -> &'static [&'static str] {
-        // Detected by content (docker-compose/DATABASE_URL), not by file signatures.
-        &[]
+        &["my.cnf", "mysql.conf"]
     }
 
     fn detect(&self, cwd: &Path) -> Option<upone_core::Detection> {
@@ -66,6 +65,11 @@ impl Provider for Mysql {
                 signature: ".env (DATABASE_URL mysql)".into(),
                 reason: "mysql detected via DATABASE_URL".into(),
             });
+        }
+        for sig in self.signatures() {
+            if cwd.join(sig).is_file() {
+                return Some(self.found(sig));
+            }
         }
         None
     }
