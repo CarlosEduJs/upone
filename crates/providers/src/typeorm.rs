@@ -109,7 +109,7 @@ fn check_typeorm(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome
         ));
     }
     emit("dependencies present, local typeorm CLI found");
-    Ok(RunOutcome::Ran("typeorm available".into()))
+    Ok(RunOutcome::Ran)
 }
 
 fn typeorm_migrate(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {

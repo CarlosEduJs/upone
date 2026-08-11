@@ -299,7 +299,7 @@ fn sqlite_ensure(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome
         "created sqlite database file at {}",
         path.display()
     ));
-    Ok(RunOutcome::Ran("created".into()))
+    Ok(RunOutcome::Ran)
 }
 
 #[cfg(test)]
@@ -384,7 +384,7 @@ mod tests {
         let path = sqlite_path(&dir).unwrap();
         let mut emit = |_: &str| {};
         let outcome = sqlite_ensure(&Context { cwd: dir.clone() }, &mut emit).unwrap();
-        assert!(matches!(outcome, RunOutcome::Ran(_)));
+        assert!(matches!(outcome, RunOutcome::Ran));
         assert!(path.is_file());
         // Second run skips.
         let outcome = sqlite_ensure(&Context { cwd: dir.clone() }, &mut emit).unwrap();

@@ -82,7 +82,7 @@ fn check_bundle(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome
     emit("ruby found on PATH");
     if which("bundle") {
         emit("bundle (bundler) found on PATH");
-        Ok(RunOutcome::Ran("bundler available".into()))
+        Ok(RunOutcome::Ran)
     } else {
         Err(RunError::Failed(
             "bundle (Bundler) not found on PATH. Install it with `gem install bundler`.".into(),

@@ -73,7 +73,7 @@ fn run_emits_event_and_outcome() {
     let mut p = Planner::new(&c);
     p.add(Task::new("a", "a", "a").run(|_c, emit| {
         emit("ran");
-        Ok(RunOutcome::Ran("ok".into()))
+        Ok(RunOutcome::Ran)
     }));
     let plan = p.build().unwrap();
 

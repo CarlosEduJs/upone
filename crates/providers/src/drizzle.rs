@@ -71,7 +71,7 @@ fn check_drizzle(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome
         ));
     }
     emit("dependencies present");
-    Ok(RunOutcome::Ran("drizzle-kit available".into()))
+    Ok(RunOutcome::Ran)
 }
 
 fn drizzle_generate(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {

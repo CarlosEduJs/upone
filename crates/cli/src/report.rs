@@ -62,7 +62,7 @@ pub fn summary(report: &Report) {
     let mut failed = 0;
     for step in &report.steps {
         match &step.status {
-            StepStatus::Done(RunOutcome::Ran(_)) => {
+            StepStatus::Done(RunOutcome::Ran) => {
                 ok += 1;
                 let detail = step.detail.as_deref().unwrap_or("");
                 println!(

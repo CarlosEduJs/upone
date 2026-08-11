@@ -118,7 +118,7 @@ fn check_prisma(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome,
         ));
     }
     emit("dependencies present");
-    Ok(RunOutcome::Ran("prisma available".into()))
+    Ok(RunOutcome::Ran)
 }
 
 fn prisma_generate(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {

@@ -97,7 +97,7 @@ fn check_sequelize(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutco
         ));
     }
     emit("dependencies present, sequelize-cli installed locally");
-    Ok(RunOutcome::Ran("sequelize available".into()))
+    Ok(RunOutcome::Ran)
 }
 
 fn sequelize_migrate(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {

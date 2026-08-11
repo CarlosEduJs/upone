@@ -91,7 +91,7 @@ fn pip_check(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, R
         },
         |bin| {
             emit(&format!("{bin} found on PATH"));
-            Ok(RunOutcome::Ran(format!("{bin} available")))
+            Ok(RunOutcome::Ran)
         },
     )
 }

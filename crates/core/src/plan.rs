@@ -5,15 +5,31 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use thiserror::Error;
+
 use crate::{Context, Risk};
 
 pub type TaskId = String;
+
+/// A plan that cannot be built, with a structured reason.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PlanError {
+    /// Two tasks use the same id.
+    #[error("duplicate task id '{id}' in the plan")]
+    DuplicateId { id: TaskId },
+    /// A task depends on a task that is not part of the plan.
+    #[error("task '{task}' depends on '{dep}' which does not exist")]
+    UnknownDependency { task: TaskId, dep: TaskId },
+    /// The plan contains a dependency cycle.
+    #[error("cycle detected in the plan (circular dependencies)")]
+    Cycle,
+}
 
 /// Result of running a task.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunOutcome {
     /// Actually ran.
-    Ran(String),
+    Ran,
     /// Skipped for idempotent reasons (already ready).
     Skipped(String),
 }
@@ -127,7 +143,7 @@ impl<'a> Planner<'a> {
     ///
     /// Returns an error when the plan has duplicate task ids, references an
     /// unknown dependency, or contains a dependency cycle.
-    pub fn build(self) -> Result<Plan, String> {
+    pub fn build(self) -> Result<Plan, PlanError> {
         self.build_inner(false)
     }
 
@@ -140,18 +156,18 @@ impl<'a> Planner<'a> {
     ///
     /// Returns an error when the plan has duplicate task ids or contains a
     /// dependency cycle.
-    pub fn build_allow_external(self) -> Result<Plan, String> {
+    pub fn build_allow_external(self) -> Result<Plan, PlanError> {
         self.build_inner(true)
     }
 
-    fn build_inner(self, allow_external: bool) -> Result<Plan, String> {
+    fn build_inner(self, allow_external: bool) -> Result<Plan, PlanError> {
         let mut dependents: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
         let mut indeg: HashMap<TaskId, usize> = HashMap::new();
         let mut by_id: HashMap<TaskId, Task> = HashMap::new();
 
         for task in self.tasks {
             if by_id.contains_key(&task.id) {
-                return Err(format!("duplicate task id '{}' in the plan", task.id));
+                return Err(PlanError::DuplicateId { id: task.id });
             }
             for dep in &task.deps {
                 dependents
@@ -175,9 +191,10 @@ impl<'a> Planner<'a> {
             for (id, task) in &by_id {
                 for dep in &task.deps {
                     if !by_id.contains_key(dep) {
-                        return Err(format!(
-                            "task '{id}' depends on '{dep}' which does not exist"
-                        ));
+                        return Err(PlanError::UnknownDependency {
+                            task: id.clone(),
+                            dep: dep.clone(),
+                        });
                     }
                 }
             }
@@ -214,7 +231,7 @@ impl<'a> Planner<'a> {
         }
 
         if done.len() != by_id.len() {
-            return Err("cycle detected in the plan (circular dependencies)".into());
+            return Err(PlanError::Cycle);
         }
 
         Ok(Plan {
@@ -258,7 +275,7 @@ mod tests {
         }
     }
 
-    fn plan_with(tasks: Vec<Task>, allow_external: bool) -> Result<Plan, String> {
+    fn plan_with(tasks: Vec<Task>, allow_external: bool) -> Result<Plan, PlanError> {
         let context = ctx("/proj");
         let mut planner = Planner::new(&context);
         for task in tasks {
@@ -271,8 +288,8 @@ mod tests {
         }
     }
 
-    /// Extracts the error message of a failed build.
-    fn build_err(tasks: Vec<Task>, allow_external: bool) -> String {
+    /// Extracts the error of a failed build.
+    fn build_err(tasks: Vec<Task>, allow_external: bool) -> PlanError {
         match plan_with(tasks, allow_external) {
             Err(e) => e,
             Ok(_) => panic!("expected the plan build to fail"),
@@ -282,19 +299,35 @@ mod tests {
     #[test]
     fn duplicate_id_rejected() {
         let tasks = vec![Task::new("x", "x", "x"), Task::new("x", "y", "y")];
-        assert!(build_err(tasks, false).contains("duplicate task id 'x'"));
+        assert_eq!(
+            build_err(tasks, false),
+            PlanError::DuplicateId {
+                id: "x".to_string()
+            }
+        );
     }
 
     #[test]
     fn duplicate_id_rejected_even_with_allow_external() {
         let tasks = vec![Task::new("x", "x", "x"), Task::new("x", "y", "y")];
-        assert!(build_err(tasks, true).contains("duplicate task id 'x'"));
+        assert_eq!(
+            build_err(tasks, true),
+            PlanError::DuplicateId {
+                id: "x".to_string()
+            }
+        );
     }
 
     #[test]
     fn unknown_dep_rejected() {
         let tasks = vec![Task::new("a", "a", "a").depends_on(["missing"])];
-        assert!(build_err(tasks, false).contains("depends on 'missing'"));
+        assert_eq!(
+            build_err(tasks, false),
+            PlanError::UnknownDependency {
+                task: "a".to_string(),
+                dep: "missing".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -312,7 +345,30 @@ mod tests {
             Task::new("a", "a", "a").depends_on(["b"]),
             Task::new("b", "b", "b").depends_on(["a"]),
         ];
-        assert!(build_err(tasks, false).contains("cycle"));
+        assert_eq!(build_err(tasks, false), PlanError::Cycle);
+    }
+
+    #[test]
+    fn plan_errors_display_helpful_messages() {
+        assert_eq!(
+            PlanError::DuplicateId {
+                id: "x".to_string()
+            }
+            .to_string(),
+            "duplicate task id 'x' in the plan"
+        );
+        assert_eq!(
+            PlanError::UnknownDependency {
+                task: "a".to_string(),
+                dep: "b".to_string(),
+            }
+            .to_string(),
+            "task 'a' depends on 'b' which does not exist"
+        );
+        assert_eq!(
+            PlanError::Cycle.to_string(),
+            "cycle detected in the plan (circular dependencies)"
+        );
     }
 
     #[test]

@@ -54,7 +54,7 @@ fn check_docker(_ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome
     }
     emit("docker found on PATH");
     match std::process::Command::new("docker").args(["info"]).output() {
-        Ok(o) if o.status.success() => Ok(RunOutcome::Ran("docker daemon responding".into())),
+        Ok(o) if o.status.success() => Ok(RunOutcome::Ran),
         Ok(_) => Err(RunError::Failed(
             "docker installed but the daemon is not running. Start Docker Desktop/daemon and try again.".into(),
         )),

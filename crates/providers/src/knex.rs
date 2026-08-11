@@ -99,7 +99,7 @@ fn check_knex(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, R
         ));
     }
     emit("dependencies present, knex CLI present");
-    Ok(RunOutcome::Ran("knex available".into()))
+    Ok(RunOutcome::Ran)
 }
 
 fn knex_migrate(ctx: &Context, emit: &mut dyn FnMut(&str)) -> Result<RunOutcome, RunError> {
