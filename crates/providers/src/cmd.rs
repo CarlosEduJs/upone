@@ -1,9 +1,11 @@
 //! Shared helpers to run commands safely and explainably.
 
+use std::collections::HashMap;
 use std::net::{TcpStream, ToSocketAddrs};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::time::{Duration, SystemTime};
 
 use upone_core::plan::{Planner, RunOutcome, Task};
 use upone_core::readiness::{resolve_env_key, Importance, ReadinessCheck, ReadinessStatus};
@@ -30,8 +32,7 @@ pub fn spawn_cmd(
     }
 
     if output.status.success() {
-        let summary = stdout.lines().last().unwrap_or("ok").trim().to_string();
-        Ok(RunOutcome::Ran(summary))
+        Ok(RunOutcome::Ran)
     } else {
         // Some tools (e.g. pnpm) report errors on stdout, so fall back to
         // it when stderr is empty. Use the tail of the output: the real
@@ -47,16 +48,16 @@ pub fn spawn_cmd(
             .collect();
         let start = lines.len().saturating_sub(3);
         let detail = lines[start..].join(" | ");
-        Err(RunError::Failed(format!(
-            "`{} {}` failed: {}",
-            program,
-            args.join(" "),
-            if detail.is_empty() {
+        Err(RunError::Command {
+            program: program.to_string(),
+            args: args.join(" "),
+            exit: output.status.code(),
+            detail: if detail.is_empty() {
                 "no output".to_string()
             } else {
                 detail
-            }
-        )))
+            },
+        })
     }
 }
 
@@ -70,21 +71,101 @@ pub fn which(program: &str) -> bool {
 /// `--version` (e.g. Go: the valid probe is `go version`).
 #[must_use]
 pub fn which_probe(program: &str, probe: &str) -> bool {
-    Command::new(program)
-        .arg(probe)
-        .output()
-        .is_ok_and(|o| o.status.success())
+    probe_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .entry((program.to_string(), probe.to_string()))
+        .or_insert_with(|| {
+            Command::new(program)
+                .arg(probe)
+                .output()
+                .is_ok_and(|o| o.status.success())
+        })
+        .to_owned()
+}
+
+/// Result of a binary probe, cached so PATH checks spawn a process only once
+/// per (program, probe) pair per run.
+type ProbeKey = (String, String);
+
+fn probe_cache() -> &'static Mutex<HashMap<ProbeKey, bool>> {
+    static CACHE: OnceLock<Mutex<HashMap<ProbeKey, bool>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+// ── Cached file reads ───────────────────────────────────────────────────────
+
+/// A file's contents as last read, keyed by the modification time (and size)
+/// observed at that moment. A change on disk forces a fresh read, so repeated
+/// detection across providers and packages stops re-reading the same file but
+/// never serves stale content.
+struct CachedFile {
+    mtime: Option<SystemTime>,
+    len: u64,
+    raw: Arc<str>,
+    lower: Arc<str>,
+    #[cfg(test)]
+    reads: usize,
+}
+
+fn file_cache() -> &'static Mutex<HashMap<PathBuf, CachedFile>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedFile>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Reads `path` once per (path, mtime, size) identity, returning the raw
+/// contents and a lowercased copy. Missing files stay uncached (each call
+/// stats the path), so a file created later is picked up immediately.
+fn cached_file(path: &Path) -> Option<(Arc<str>, Arc<str>)> {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta.modified().ok();
+    let len = meta.len();
+
+    {
+        let cache = file_cache().lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(entry) = cache.get(path) {
+            if entry.mtime == mtime && entry.len == len {
+                return Some((entry.raw.clone(), entry.lower.clone()));
+            }
+        }
+    }
+
+    let raw = Arc::<str>::from(std::fs::read_to_string(path).ok()?);
+    let lower = Arc::<str>::from(raw.to_lowercase());
+    #[cfg(test)]
+    let prev_reads = cache_reads(path) + 1;
+
+    let mut cache = file_cache().lock().unwrap_or_else(PoisonError::into_inner);
+    cache.insert(
+        path.to_path_buf(),
+        CachedFile {
+            mtime,
+            len,
+            raw: raw.clone(),
+            lower: lower.clone(),
+            #[cfg(test)]
+            reads: prev_reads,
+        },
+    );
+    drop(cache);
+    Some((raw, lower))
+}
+
+#[cfg(test)]
+fn cache_reads(path: &Path) -> usize {
+    file_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(path)
+        .map_or(0, |e| e.reads)
 }
 
 /// Returns true if `needle` appears (case-insensitive) anywhere in the given files.
 pub fn files_contain(cwd: &Path, files: &[&str], needles: &[&str]) -> bool {
+    let needles: Vec<String> = needles.iter().map(|n| n.to_lowercase()).collect();
     files.iter().any(|file| {
-        let path = cwd.join(file);
-        let ok = std::fs::read_to_string(&path);
-        ok.is_ok_and(|content| {
-            let lower = content.to_lowercase();
-            needles.iter().any(|n| lower.contains(&n.to_lowercase()))
-        })
+        cached_file(&cwd.join(file))
+            .is_some_and(|(_, lower)| needles.iter().any(|n| lower.contains(n)))
     })
 }
 
@@ -168,7 +249,7 @@ pub fn migration_db_dep(cwd: &Path) -> Option<&'static str> {
 pub fn compose_host_port(cwd: &Path, files: &[&str], container_port: u16) -> u16 {
     let needle = format!(":{container_port}");
     for file in files {
-        let Ok(content) = std::fs::read_to_string(cwd.join(file)) else {
+        let Some((content, _)) = cached_file(&cwd.join(file)) else {
             continue;
         };
         for line in content.lines() {
@@ -195,7 +276,7 @@ pub fn compose_host_port(cwd: &Path, files: &[&str], container_port: u16) -> u16
 /// dedicated config file. Parses the manifest as JSON so unrelated keys (e.g.
 /// `scripts.next` or `overrides.next`) can never trigger a match.
 pub fn package_has_dependency(cwd: &Path, dependency: &str) -> bool {
-    let Ok(text) = std::fs::read_to_string(cwd.join("package.json")) else {
+    let Some((text, _)) = cached_file(&cwd.join("package.json")) else {
         return false;
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
@@ -314,7 +395,7 @@ pub fn check_binary(
 ) -> Result<RunOutcome, RunError> {
     if which(bin) {
         emit(&format!("{bin} found on PATH"));
-        Ok(RunOutcome::Ran(format!("{bin} available")))
+        Ok(RunOutcome::Ran)
     } else {
         Err(RunError::Failed(format!("{bin} not found on PATH. {hint}")))
     }
@@ -334,7 +415,7 @@ pub fn check_binary_probe(
 ) -> Result<RunOutcome, RunError> {
     if which_probe(bin, probe) {
         emit(&format!("{bin} found on PATH"));
-        Ok(RunOutcome::Ran(format!("{bin} available")))
+        Ok(RunOutcome::Ran)
     } else {
         Err(RunError::Failed(format!("{bin} not found on PATH. {hint}")))
     }
@@ -474,7 +555,7 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn temp_dir(name: &str) -> std::path::PathBuf {
+    fn temp_dir(name: &str) -> PathBuf {
         crate::testkit::temp_dir("cmd", name)
     }
 
@@ -543,6 +624,67 @@ mod tests {
         assert_eq!(compose_host_port(&dir, &files, 5432), 15432);
         // Nothing matching that container port -> fallback unchanged.
         assert_eq!(compose_host_port(&dir, &files, 6379), 6379);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn cache_path(name: &str) -> PathBuf {
+        let dir = temp_dir(name);
+        fs::create_dir_all(&dir).unwrap();
+        dir.join("compose.yml")
+    }
+
+    #[test]
+    fn cached_read_deduplicates_and_refreshes_on_change() {
+        let file = cache_path("cache");
+        fs::write(&file, "services:\n  db:\n    image: postgres\n").unwrap();
+
+        let dir = file.parent().unwrap();
+        let before = cache_reads(&file);
+        assert!(files_contain(dir, &["compose.yml"], &["postgres"]));
+        assert_eq!(cache_reads(&file), before + 1, "first read hits the disk");
+
+        assert!(files_contain(dir, &["compose.yml"], &["POSTGRES"]));
+        assert_eq!(
+            cache_reads(&file),
+            before + 1,
+            "subsequent reads must not re-open the file"
+        );
+
+        // A change on disk (mtime and/or size) forces a fresh read, so stale
+        // content is never served after a setup step rewrites the file.
+        std::thread::sleep(Duration::from_millis(20));
+        fs::write(&file, "services:\n  cache:\n    image: redis\n").unwrap();
+        assert!(files_contain(dir, &["compose.yml"], &["redis"]));
+        assert!(!files_contain(dir, &["compose.yml"], &["postgres"]));
+        assert!(
+            cache_reads(&file) > before + 1,
+            "an mtime change must re-read the file"
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cached_read_serves_raw_parseable_content() {
+        let dir = temp_dir("cache-dep");
+        fs::write(
+            dir.join("package.json"),
+            r#"{"dependencies":{"next":"15.0.0"}}"#,
+        )
+        .unwrap();
+        let before = cache_reads(&dir.join("package.json"));
+        assert!(package_has_dependency(&dir, "next"));
+        assert!(package_has_dependency(&dir, "next"));
+        assert_eq!(cache_reads(&dir.join("package.json")), before + 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cargo_commands_report_exit_diagnostic() {
+        let dir = temp_dir("runerr");
+        let mut emit = |_: &str| {};
+        let err = spawn_cmd("false", &[], &dir, &mut emit).unwrap_err();
+        assert!(matches!(err, RunError::Command { .. }));
         let _ = fs::remove_dir_all(&dir);
     }
 }

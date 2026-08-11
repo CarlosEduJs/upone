@@ -7,8 +7,21 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum RunError {
-    #[error("task failed: {0}")]
+    /// A task reported a hard failure with a human-readable message.
+    #[error("{0}")]
     Failed(String),
+    /// A spawned command exited non-zero.
+    #[error("`{program} {args}` failed: {detail}")]
+    Command {
+        /// The command that was run.
+        program: String,
+        /// Its arguments, joined for display.
+        args: String,
+        /// Process exit code, when the OS reported one.
+        exit: Option<i32>,
+        /// Tail of the command output that explains the failure.
+        detail: String,
+    },
     #[error("I/O failure: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -79,7 +92,7 @@ mod tests {
         let mut report = Report::new();
         report
             .steps
-            .push(step("ok", StepStatus::Done(RunOutcome::Ran("ok".into()))));
+            .push(step("ok", StepStatus::Done(RunOutcome::Ran)));
         report.steps.push(step("running", StepStatus::Running));
         report
             .steps
@@ -179,10 +192,8 @@ impl<'a> Engine<'a> {
                         let mut emitted: Vec<String> = Vec::new();
                         let mut emit = |line: &str| emitted.push(line.to_string());
                         let run_ctx = cwd.map_or(ctx, |dir| Context { cwd: dir });
-                        let outcome = run.map_or_else(
-                            || Ok(RunOutcome::Ran("no action".to_string())),
-                            |run| run(&run_ctx, &mut emit),
-                        );
+                        let outcome =
+                            run.map_or_else(|| Ok(RunOutcome::Ran), |run| run(&run_ctx, &mut emit));
                         (outcome, emitted)
                     }),
                 ));

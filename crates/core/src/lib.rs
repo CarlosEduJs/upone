@@ -63,7 +63,7 @@ pub mod readiness;
 pub mod run;
 
 pub use detect::{detect, Detected, Provider, Registry};
-pub use plan::{Plan, Planner, RunOutcome, Task, TaskId};
+pub use plan::{Plan, PlanError, Planner, RunOutcome, Task, TaskId};
 pub use readiness::{
     env_requirements_from_template, resolve_env_key, sweep, EnvRequirement, Importance,
     ReadinessCheck, ReadinessReport, ReadinessResult, ReadinessStatus,
