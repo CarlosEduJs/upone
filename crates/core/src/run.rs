@@ -11,7 +11,7 @@ pub enum RunError {
     #[error("{0}")]
     Failed(String),
     /// A spawned command exited non-zero.
-    #[error("`{program} {args}` failed: {detail}")]
+    #[error("`{program} {args}` failed (exit: {exit:?}): {detail}")]
     Command {
         /// The command that was run.
         program: String,
