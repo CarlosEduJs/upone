@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.0
+
+Crate versions in this release:
+
+| Crate | Version |
+| --- | --- |
+| upone | 0.8.0 |
+| upone-core | 0.5.0 |
+| upone-providers | 0.7.1 |
+
+### upone
+
+- update upone-core 0.4.0 -> 0.5.0
+- update upone-providers 0.7.0 -> 0.7.1
+
+### upone-core
+
+- Type task plan errors as PlanError and add RunError::Command for failed commands
+
+### upone-providers
+
+- Cache file reads and which() probes to cut redundant I/O during detection and planning
 ## 0.7.0
 
 Crate versions in this release:

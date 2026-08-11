@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.5.0
+
+- Type task plan errors as PlanError and add RunError::Command for failed commands
 ## 0.4.0
 
 - Tighten the planner: reject duplicate task ids, missing dependencies and dependency cycles with clear errors, stamp every task with its working directory, support topological builds that ignore external tasks, and surface only real failures in the run report
